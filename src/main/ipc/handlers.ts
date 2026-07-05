@@ -1,6 +1,12 @@
+import dayjs from 'dayjs'
 import { ipcMain, BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../../shared/ipcChannels'
-import type { MessagePoolInput, PetReactionPayload, PlanInput } from '../../../shared/types'
+import type {
+  MessagePoolInput,
+  PetReactionPayload,
+  PlanInput,
+  ReminderSettings
+} from '../../../shared/types'
 import { openPanelWindow } from '../windows/panelWindow'
 import {
   listPlans,
@@ -17,7 +23,14 @@ import {
   deleteMessage,
   setMessageActive
 } from '../store/repositories/messagePoolRepo'
-import { triggerCheckinReaction, triggerGoalDoneReaction } from '../engine/reactionCoordinator'
+import { getReminderSettings, setReminderSettings } from '../store/repositories/settingsRepo'
+import {
+  triggerCheckinReaction,
+  triggerGoalDoneReaction,
+  triggerNudgeReaction,
+  triggerDailySummary
+} from '../engine/reactionCoordinator'
+import { rescheduleReminders } from '../scheduler/reminderScheduler'
 
 export function registerIpcHandlers(petWindow: BrowserWindow): void {
   let dragOrigin: { x: number; y: number } | null = null
@@ -95,4 +108,20 @@ export function registerIpcHandlers(petWindow: BrowserWindow): void {
   ipcMain.handle(IPC_CHANNELS.MESSAGES_SET_ACTIVE, (_event, id: number, isActive: boolean) =>
     setMessageActive(id, isActive)
   )
+
+  ipcMain.handle(IPC_CHANNELS.REMINDERS_GET_SETTINGS, () => getReminderSettings())
+
+  ipcMain.handle(IPC_CHANNELS.REMINDERS_SET_SETTINGS, (_event, settings: ReminderSettings) => {
+    const saved = setReminderSettings(settings)
+    rescheduleReminders(petWindow)
+    return saved
+  })
+
+  ipcMain.on(IPC_CHANNELS.REMINDERS_TEST_NUDGE, () => {
+    triggerNudgeReaction(petWindow, dayjs().format('YYYY-MM-DD'))
+  })
+
+  ipcMain.on(IPC_CHANNELS.REMINDERS_TEST_SUMMARY, () => {
+    triggerDailySummary(petWindow, dayjs().format('YYYY-MM-DD'))
+  })
 }

@@ -16,5 +16,9 @@ export const IPC_CHANNELS = {
   MESSAGES_CREATE: 'messages:create',
   MESSAGES_UPDATE: 'messages:update',
   MESSAGES_DELETE: 'messages:delete',
-  MESSAGES_SET_ACTIVE: 'messages:set-active'
+  MESSAGES_SET_ACTIVE: 'messages:set-active',
+  REMINDERS_GET_SETTINGS: 'reminders:get-settings',
+  REMINDERS_SET_SETTINGS: 'reminders:set-settings',
+  REMINDERS_TEST_NUDGE: 'reminders:test-nudge',
+  REMINDERS_TEST_SUMMARY: 'reminders:test-summary'
 } as const

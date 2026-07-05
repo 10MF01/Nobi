@@ -3,6 +3,7 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { createPetWindow } from './windows/petWindow'
 import { registerIpcHandlers } from './ipc/handlers'
 import { createTray } from './tray'
+import { rescheduleReminders } from './scheduler/reminderScheduler'
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.nobi.app')
@@ -19,6 +20,7 @@ app.whenReady().then(() => {
   const petWindow = createPetWindow()
   registerIpcHandlers(petWindow)
   createTray()
+  rescheduleReminders(petWindow)
 })
 
 // Subscribing with an empty handler overrides Electron's default quit-on-close behavior;

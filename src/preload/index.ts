@@ -7,7 +7,8 @@ import type {
   MessagePoolInput,
   PetReactionPayload,
   Plan,
-  PlanInput
+  PlanInput,
+  ReminderSettings
 } from '../../shared/types'
 
 // Custom APIs for renderer
@@ -54,6 +55,14 @@ const api = {
     delete: (id: number): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.MESSAGES_DELETE, id),
     setActive: (id: number, isActive: boolean): Promise<MessagePoolEntry> =>
       ipcRenderer.invoke(IPC_CHANNELS.MESSAGES_SET_ACTIVE, id, isActive)
+  },
+  reminders: {
+    getSettings: (): Promise<ReminderSettings> =>
+      ipcRenderer.invoke(IPC_CHANNELS.REMINDERS_GET_SETTINGS),
+    setSettings: (settings: ReminderSettings): Promise<ReminderSettings> =>
+      ipcRenderer.invoke(IPC_CHANNELS.REMINDERS_SET_SETTINGS, settings),
+    testNudge: (): void => ipcRenderer.send(IPC_CHANNELS.REMINDERS_TEST_NUDGE),
+    testSummary: (): void => ipcRenderer.send(IPC_CHANNELS.REMINDERS_TEST_SUMMARY)
   }
 }
 

@@ -43,6 +43,18 @@ export function getDb(): Database.Database {
       last_used_at TEXT,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_summaries (
+      date TEXT PRIMARY KEY,
+      completion_rate REAL NOT NULL,
+      streak INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `)
 
   seedMessagePoolsIfEmpty(db)

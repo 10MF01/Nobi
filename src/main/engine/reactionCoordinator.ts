@@ -1,16 +1,20 @@
 import dayjs from 'dayjs'
+import { Notification } from 'electron'
 import type { BrowserWindow } from 'electron'
+import icon from '../../../resources/icon.png?asset'
 import { IPC_CHANNELS } from '../../../shared/ipcChannels'
 import type { PetReactionPayload, ReactionContext, ReactionResult } from '../../../shared/types'
 import { listPlans } from '../store/repositories/planRepo'
-import { listCheckInsInRange } from '../store/repositories/checkinRepo'
+import { listCheckInsForDate, listCheckInsInRange } from '../store/repositories/checkinRepo'
 import { listActiveMessages, markMessageUsed } from '../store/repositories/messagePoolRepo'
-import { computeDailyStats } from './streakCalculator'
-import { reactionEngine } from './reactionEngine'
+import { upsertDailySummary } from '../store/repositories/dailySummaryRepo'
+import { computeDailyStats, type DailyStats } from './streakCalculator'
+import { reactionEngine, pickMessageForCategory } from './reactionEngine'
 
 const DATE_FORMAT = 'YYYY-MM-DD'
 const LOOKBACK_DAYS = 60
 const REACTION_DURATION_MS = 4500
+const NUDGE_DURATION_MS = 6000
 const LOW_RATE_THRESHOLD = 0.4
 
 function weekdayOfDate(date: string): number {
@@ -33,8 +37,13 @@ function sendReaction(petWindow: BrowserWindow, result: ReactionResult): void {
   petWindow.webContents.send(IPC_CHANNELS.PET_REACTION, payload)
 }
 
-/** 打卡（daily/weekly）触发：真正算今天完成率 + 连续天数，交给 reactionEngine 决定情绪与文案 */
-export function triggerCheckinReaction(petWindow: BrowserWindow, date: string): void {
+function sendNotification(title: string, body: string): void {
+  if (!Notification.isSupported()) return
+  new Notification({ title, body, icon }).show()
+}
+
+/** 打卡/日终总结共用的完成率+连续天数计算，避免重复拼装 checkin 数据 */
+function buildTodayContext(date: string): { ctx: ReactionContext; todayStats: DailyStats } {
   const plans = listPlans()
   const checkIns = listCheckInsInRange(offsetDate(date, -LOOKBACK_DAYS), date)
 
@@ -63,6 +72,12 @@ export function triggerCheckinReaction(petWindow: BrowserWindow, date: string): 
     pool: listActiveMessages()
   }
 
+  return { ctx, todayStats }
+}
+
+/** 打卡（daily/weekly）触发：真正算今天完成率 + 连续天数，交给 reactionEngine 决定情绪与文案 */
+export function triggerCheckinReaction(petWindow: BrowserWindow, date: string): void {
+  const { ctx } = buildTodayContext(date)
   sendReaction(petWindow, reactionEngine.react(ctx))
 }
 
@@ -77,4 +92,43 @@ export function triggerGoalDoneReaction(petWindow: BrowserWindow): void {
   }
 
   sendReaction(petWindow, reactionEngine.react(ctx))
+}
+
+/** 中午/晚间提醒：今天还有 daily/weekly 计划没打卡时，才弹一次轻推（气泡 + 系统通知），已经全部打卡就安静 */
+export function triggerNudgeReaction(petWindow: BrowserWindow, date: string): void {
+  const plans = listPlans()
+  const checkedIds = new Set(listCheckInsForDate(date).map((c) => c.planId))
+  const applicablePlans = plans.filter(
+    (p) =>
+      p.type === 'daily' ||
+      (p.type === 'weekly' && (p.weekdays?.includes(weekdayOfDate(date)) ?? false))
+  )
+  const allDone = applicablePlans.every((p) => checkedIds.has(p.id))
+  if (applicablePlans.length === 0 || allDone) return
+
+  const message = pickMessageForCategory(listActiveMessages(), 'neutral')
+  if (!message) return
+  markMessageUsed(message.id)
+
+  const payload: PetReactionPayload = {
+    emotion: 'idle',
+    durationMs: NUDGE_DURATION_MS,
+    message: message.text
+  }
+  petWindow.webContents.send(IPC_CHANNELS.PET_REACTION, payload)
+  sendNotification('のびちゃん', message.text)
+}
+
+/** 日终总结：写入 daily_summaries 快照（供 M6 HistoryPage 使用），并给一次真实反应 + 通知总结文案 */
+export function triggerDailySummary(petWindow: BrowserWindow, date: string): void {
+  const { ctx, todayStats } = buildTodayContext(date)
+  upsertDailySummary(date, todayStats.completionRate, todayStats.currentStreak)
+
+  sendReaction(petWindow, reactionEngine.react(ctx))
+
+  const ratePercent = Math.round(todayStats.completionRate * 100)
+  sendNotification(
+    '今日总结',
+    `今天完成率 ${ratePercent}%，连续 ${todayStats.currentStreak} 天达标。`
+  )
 }

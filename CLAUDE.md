@@ -69,7 +69,7 @@ npm run build:mac           # 打包 macOS（dmg）
 - `src/main/tray.ts` — 系统托盘图标与右键菜单
 - `src/main/store/`（M3 起）— `db.ts` 是 `better-sqlite3` 单例连接（懒加载，数据库文件在 `app.getPath('userData')/nobi.db`），启动时 `CREATE TABLE IF NOT EXISTS` 建表，没有做正式迁移框架；`repositories/planRepo.ts`、`repositories/checkinRepo.ts` 封装 SQL，对外只暴露 `shared/types.ts` 里的驼峰字段类型（repo 内部负责 snake_case 列名 ↔ 驼峰字段的转换）
 - `src/main/engine/`（M4 起）— `reactionEngine.ts`/`streakCalculator.ts` 是纯函数，零 Electron/DB 依赖、可单测、未来可替换成调用 Claude API 的动态生成版本；`reactionCoordinator.ts` 负责把 repo 查询结果组装成两者需要的输入，并把结果通过 `petWindow.webContents.send` 推给宠物窗口，是主进程里唯一同时接触"纯引擎"和"Electron/DB"的胶水层
-- `src/main/scheduler/`（M5 起）— `node-schedule` 定时任务（中午提醒/晚间提醒/日终总结）
+- `src/main/scheduler/`（M5 起）— `reminderScheduler.ts`，`node-schedule` 定时任务（中午提醒/晚间提醒/日终总结），`rescheduleReminders(petWindow)` 在 app 启动时和每次面板保存提醒设置后都会被调用，先 cancel 所有旧 job 再按最新设置重建，避免重复注册
 
 ### 动画系统约定（M2 起生效，framer-motion 方案）
 
@@ -98,6 +98,17 @@ npm run build:mac           # 打包 macOS（dmg）
 - 面板新增"文案库"标签页（`src/renderer/panel/pages/MessagePoolsPage.tsx`），用 `Tabs` 按 `MessageCategory` 分组，每组一个 `Switch` 控制启用/停用 + 行内编辑（点"编辑"切成 `TextArea`，点"保存"提交）+ `Popconfirm` 删除，风格和 `PlansPage` 保持一致。
 - 已在真实 Windows 桌面验证：勾选每日计划打卡后，のびちゃん 正确切换到 happy 情绪并弹出从种子文案库里选中的一条鼓励语气泡（气泡随情绪动画一起在 `durationMs` 后消失）；文案库页面能看到 5 个分类各 7 条种子文案，开关/编辑/删除入口渲染正常。
 
+### 主动提醒与日终总结（M5 起生效）
+
+- `shared/types.ts` 新增 `ReminderSettings { noonEnabled, noonTime, eveningEnabled, eveningTime, summaryEnabled, summaryTime }`（`*Time` 是 `HH:mm` 字符串）和 `DailySummary { date, completionRate, streak, createdAt }`。
+- 提醒时间/开关这类轻量设置**没有用原始方案里提到的 `electron-store`**，而是复用已经跑通的 `better-sqlite3`，新增一张通用 `settings` 表（`key TEXT PRIMARY KEY, value TEXT`，value 存 JSON），`src/main/store/repositories/settingsRepo.ts` 的 `getReminderSettings`/`setReminderSettings` 读写 `key = 'reminderSettings'` 这一行，读不到时回退到代码里的默认值（中午 12:30/晚间 21:00/日终 23:30，均默认开启）。这是为了少引入一个依赖／避免重蹈 `better-sqlite3` 当初 ABI 版本踩坑的覆辙，不是长期设计上的强约束，如果以后 `settings` 表并不好用可以再换。
+- 新增 `daily_summaries` 表（`date` 主键，`completion_rate`/`streak`/`created_at`），`repositories/dailySummaryRepo.ts` 的 `upsertDailySummary` 每天写一行快照，是给 M6 `HistoryPage` 用的历史数据来源，M5 本身不读它。
+- `reactionEngine.ts` 里原本内部私有的选文案逻辑改名导出成 `pickMessageForCategory(pool, category)`，因为提醒场景（中午/晚间 nudge）的 `MessageCategory` 是外部直接指定的 `'neutral'`，不需要走 `decideCategory` 那套"看完成率"的决策分支——`reactionEngine.react()` 内部仍然调用同一个函数，只是提醒场景绕过了 `react()` 直接调它。
+- `reactionCoordinator.ts` 新增两个函数：`triggerNudgeReaction(petWindow, date)` 只有在"今天存在还没打卡的 daily/weekly 计划"时才会弹一次 `idle` 情绪的气泡 + 系统通知（`neutral` 分类文案），全部打卡完就安静不打扰；`triggerDailySummary(petWindow, date)` 复用打卡反应同一套完成率/连续天数计算（提取成了 `buildTodayContext` 共享函数），额外写入 `daily_summaries` 快照并发一条"今天完成率 xx%，连续 N 天"的系统通知。系统通知统一走 `sendNotification(title, body)` helper（`Notification.isSupported()` 判断 + 复用托盘那个 `resources/icon.png` 做图标），Windows 下能正确显示 Nobi 图标和应用名是因为 `main/index.ts` 里已经调用过 `electronApp.setAppUserModelId('com.nobi.app')`。
+- IPC 新增 `REMINDERS_GET_SETTINGS`/`REMINDERS_SET_SETTINGS`（`handle`，因为要返回值）和 `REMINDERS_TEST_NUDGE`/`REMINDERS_TEST_SUMMARY`（`on`，纯触发不需要返回值）；保存设置的 handler 里 `setReminderSettings` 之后立刻调用 `rescheduleReminders(petWindow)`，让改动马上生效，不需要重启 app。
+- 面板新增"提醒设置"标签页（`src/renderer/panel/pages/ReminderSettingsPage.tsx`）：三行 `Switch + TimePicker`（`format='HH:mm'`，和 `PlansPage` 的 `DatePicker` 一样，`Dayjs` 只在表单层出现，`.format('HH:mm')` 之后才落到 IPC/DB）+ 保存按钮；下面单独一个"立即测试"区块，两个按钮直接调 `window.api.reminders.testNudge()`/`testSummary()`，不用等到设定的时间点也能验证真实的提醒/总结逻辑——这是刻意加的，因为定时任务本身很难在开发阶段"等出来"验证。
+- 已在真实 Windows 桌面验证：面板打开时正确读到默认提醒时间；点"测试：日终总结"后のびちゃん 弹出鼓励语气泡，同时右下角弹出 Windows 原生通知"今日总结 / 今天完成率 100%，连续 1 天达标。"；点"测试：打卡提醒"在当天已全部打卡的情况下正确保持静默（无气泡无通知），符合"不要过度打扰"的设计。
+
 ### 面板 UI 组件库约定（Ant Design，M3 后接入）
 
 - `src/renderer/panel/App.tsx` 顶层包一层 `ConfigProvider`，`theme.token` 里定义了品牌主题色：`colorPrimary: '#3f9b54'`（森绿，呼应のびちゃん本身的配色，不是 Ant Design 默认的靛蓝），以及 `colorBgLayout`/`colorBorder`/`fontFamily`（CJK 字体栈 `PingFang SC`/`Microsoft YaHei UI` 优先）。以后调整面板整体配色，改这里的 token 就行，不用满页面找内联样式。同时传了 `locale={zhCN}`（`antd/locale/zh_CN`），保证 `DatePicker`/`Popconfirm` 等内置文案是中文。
@@ -111,7 +122,7 @@ npm run build:mac           # 打包 macOS（dmg）
 2. ✅ **M2**（已完成）— 情绪状态机：`framer-motion` 驱动的可爱角色（`PetCharacter.tsx`），idle/happy/comfort/stern 四态，面板测试按钮手动触发，收到反应后自动播放并在 `durationMs` 后回到 idle。已逐个状态截图验证。
 3. ✅ **M3**（已完成）— 计划/打卡数据模型：`better-sqlite3` 接入（`src/main/store/`），`PlansPage` 完整支持四种计划类型的增删改查、打卡/完成勾选、行内编辑。已在真实 Windows 桌面上创建四种类型的计划、勾选打卡/完成、编辑标题、删除，并**完全重启应用**验证数据正确持久化（sqlite 文件在 userData 目录，不是内存态）。
 4. ✅ **M4**（已完成）— 文案库 + 规则引擎接入打卡：`message_pools` 表 + 35 条种子文案、纯函数 `reactionEngine`/`streakCalculator` + 依赖二者的 `reactionCoordinator`，打卡/完成目标真正触发のびちゃん情绪反应 + 气泡文案。已在真实 Windows 桌面上验证打卡后正确弹出对应情绪与文案，文案库页面 CRUD 正常。
-5. ⏳ **M5** — 主动提醒/通知：`node-schedule` 定时任务、原生通知、设置里可调提醒时间。
+5. ✅ **M5**（已完成）— 主动提醒/通知：`node-schedule` 定时任务（中午/晚间提醒 + 日终总结）、原生通知（`Notification` API）、面板"提醒设置"页可调时间与开关并支持立即测试。已在真实 Windows 桌面上验证日终总结正确弹出情绪反应 + 系统通知，打卡提醒在无需提醒时正确保持静默。
 6. ⏳ **M6** — `HistoryPage`、UI 打磨、`electron-builder` 双平台打包测试。
 
 每个里程碑都应该能独立用 `npm run dev` 跑起来验证，不要攒成一次性大版本再测试。

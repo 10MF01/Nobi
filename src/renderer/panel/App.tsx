@@ -4,6 +4,7 @@ import zhCN from 'antd/locale/zh_CN'
 import type { EmotionState } from '../../../shared/types'
 import { PlansPage } from './pages/PlansPage'
 import { MessagePoolsPage } from './pages/MessagePoolsPage'
+import { ReminderSettingsPage } from './pages/ReminderSettingsPage'
 
 const { Content } = Layout
 const { Title } = Typography
@@ -54,6 +55,7 @@ function App(): React.JSX.Element {
             items={[
               { key: 'plans', label: '计划管理', children: <PlansPage /> },
               { key: 'messages', label: '文案库', children: <MessagePoolsPage /> },
+              { key: 'reminders', label: '提醒设置', children: <ReminderSettingsPage /> },
               {
                 key: 'test',
                 label: '测试反应',

@@ -77,3 +77,21 @@ export interface ReactionResult {
 export interface ReactionEngine {
   react(ctx: ReactionContext): ReactionResult
 }
+
+export interface ReminderSettings {
+  noonEnabled: boolean
+  /** HH:mm，24 小时制 */
+  noonTime: string
+  eveningEnabled: boolean
+  eveningTime: string
+  summaryEnabled: boolean
+  summaryTime: string
+}
+
+/** 日终总结快照，M6 HistoryPage 会用到 */
+export interface DailySummary {
+  date: string
+  completionRate: number
+  streak: number
+  createdAt: string
+}
