@@ -131,4 +131,4 @@ npm run build:mac           # 打包 macOS（dmg）
 
 - 本地已 `git init`，提交身份是**仓库级别**单独设置的 `user.name=MFF` / `user.email=xiaofeima600@gmail.com`（跟这台电脑全局 git 配置的公司邮箱不一样，只在这个仓库生效）。
 - **每完成一个里程碑/功能点，都要在验证通过后立刻本地 commit**，方便随时回退 —— 这是用户明确要求的工作习惯，不要攒到最后一起提交。
-- 远程仓库暂缓（用户还没决定托管平台），目前只做本地提交；等用户提供远程地址后再配置 `git remote add origin` 并推送。
+- 远程仓库：`origin` = `https://github.com/10MF01/Nobi.git`（2026-07-05 起接入，M5 完成后首次推送，`main` 分支已跟踪）。日常仍然是"本地 commit 优先"，但里程碑完成后除了本地 commit 也应该 push 到远端做异地备份；push 前留意 Windows Credential Manager 里 `git:https://github.com` 的缓存凭证如果失效会导致推送被拒（`Invalid username or token`），需要清掉重新走一次 GCM 登录。
