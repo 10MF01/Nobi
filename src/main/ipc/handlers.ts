@@ -1,5 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../../shared/ipcChannels'
+import type { PetReactionPayload } from '../../../shared/types'
 import { openPanelWindow } from '../windows/panelWindow'
 
 export function registerIpcHandlers(petWindow: BrowserWindow): void {
@@ -16,11 +17,19 @@ export function registerIpcHandlers(petWindow: BrowserWindow): void {
   })
 
   ipcMain.on(IPC_CHANNELS.PET_CLICK, () => {
-    // M1 placeholder: reaction engine (emotion + message) lands in M4.
-    console.log('[Nobi] pet clicked')
+    // Petting のびちゃん gives a small happy pulse. The real rule-driven
+    // reaction (completion rate / streak based) lands in M4.
+    petWindow.webContents.send(IPC_CHANNELS.PET_REACTION, {
+      emotion: 'happy',
+      durationMs: 1200
+    } satisfies PetReactionPayload)
   })
 
   ipcMain.on(IPC_CHANNELS.PANEL_OPEN, () => {
     openPanelWindow()
+  })
+
+  ipcMain.on(IPC_CHANNELS.PANEL_TEST_REACTION, (_event, payload: PetReactionPayload) => {
+    petWindow.webContents.send(IPC_CHANNELS.PET_REACTION, payload)
   })
 }

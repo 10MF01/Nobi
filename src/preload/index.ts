@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC_CHANNELS } from '../../shared/ipcChannels'
+import type { PetReactionPayload } from '../../shared/types'
 
 // Custom APIs for renderer
 const api = {
@@ -8,10 +9,18 @@ const api = {
     dragStart: (): void => ipcRenderer.send(IPC_CHANNELS.PET_DRAG_START),
     dragMove: (dx: number, dy: number): void =>
       ipcRenderer.send(IPC_CHANNELS.PET_DRAG_MOVE, { dx, dy }),
-    click: (): void => ipcRenderer.send(IPC_CHANNELS.PET_CLICK)
+    click: (): void => ipcRenderer.send(IPC_CHANNELS.PET_CLICK),
+    onReaction: (callback: (payload: PetReactionPayload) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: PetReactionPayload): void =>
+        callback(payload)
+      ipcRenderer.on(IPC_CHANNELS.PET_REACTION, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PET_REACTION, listener)
+    }
   },
   panel: {
-    open: (): void => ipcRenderer.send(IPC_CHANNELS.PANEL_OPEN)
+    open: (): void => ipcRenderer.send(IPC_CHANNELS.PANEL_OPEN),
+    testReaction: (payload: PetReactionPayload): void =>
+      ipcRenderer.send(IPC_CHANNELS.PANEL_TEST_REACTION, payload)
   }
 }
 

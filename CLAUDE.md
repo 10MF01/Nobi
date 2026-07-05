@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 已锁定的产品/技术决策
 
 - 技术栈：**Electron + React + TypeScript**（`electron-vite` 脚手架）
-- 形象动画：**精灵图/帧动画**起步（非 Live2D；未来可能升级，但当前不要引入 Live2D 相关依赖）
+- 形象动画：**`framer-motion` 驱动的手绘 SVG 角色**（`src/renderer/pet/PetCharacter.tsx`），不是 PNG 精灵图/帧动画，也不是 Live2D。这是 M2 阶段对最初"精灵图起步"方案的修正 —— 用户看了占位图后反馈"不够可爱"，明确表示**为了界面效果可以引入动画库/组件库，即使增加维护成本也没关系**。以后再调整角色外观/表情，直接改这个文件里的 SVG 形状和 `framer-motion` 的 variants，不需要准备美术资源文件。
 - 文案生成：**纯预设模板**，规则驱动选择（非 LLM 动态生成）—— 但 `reactionEngine` 要保持接口隔离，方便未来替换成调用 Claude API 的动态生成版本
 - 平台：**Windows + Mac 双平台**，从架构上就要考虑两个平台的差异（透明窗口、托盘、通知等）
 - 计划类型：每日/每周固定任务、长期目标/倒计时、临时/单次待办，三种都要支持
@@ -71,17 +71,27 @@ npm run build:mac           # 打包 macOS（dmg）
 - `src/main/engine/`（M4 起）— `reactionEngine.ts` 规则引擎，接口是 `ReactionEngine { react(ctx: ReactionContext): ReactionResult }`，刻意保持零 Electron 依赖、可单测、可在未来替换成调用 Claude API 的动态生成版本而不改调用方
 - `src/main/scheduler/`（M5 起）— `node-schedule` 定时任务（中午提醒/晚间提醒/日终总结）
 
-### 动画系统约定（M2 起生效）
+### 动画系统约定（M2 起生效，framer-motion 方案）
 
-`resources/sprites/<emotion-state>/` 每个情绪状态一个文件夹，内含 `manifest.json`（帧宽高/帧数/fps/循环模式）+ 顺序编号 PNG 帧，不用图集，方便后续手动替换素材。渲染层用 `<canvas>` + `requestAnimationFrame` 播放，"何时切换状态"的决策权始终在主进程（通过 IPC 推送 `pet:reaction` 事件），渲染层只负责播放动画，不自行决策。
+- `shared/types.ts` 定义 `EmotionState = 'idle' | 'happy' | 'comfort' | 'stern'` 和 `PetReactionPayload { emotion, durationMs }`，是情绪状态的唯一权威定义。
+- `src/renderer/pet/PetCharacter.tsx` 是纯展示组件：接收 `emotion` prop，用 `framer-motion` 的 `variants` 控制整体身体动作（呼吸/跳动/摇摆/抖动），内部 `Eyes`/`Mouth` 子组件按 emotion 分支渲染不同的 SVG 形状（不做路径变形，直接切换整个形状，更简单可靠）。
+- **"何时切换状态"的决策权始终在主进程**：主进程通过 `ipcMain`→`petWindow.webContents.send(IPC_CHANNELS.PET_REACTION, payload)` 推送 `{ emotion, durationMs }`，`src/renderer/pet/App.tsx` 收到后 `setEmotion` 并启动一个 `setTimeout(durationMs)` 到期自动回到 `idle`（对应原计划里"播一次后回到 idle"的 loopMode，只是用 setTimeout 实现而不是精灵图 manifest 里的字段）。
+- 面板页面（`src/renderer/panel/App.tsx`）有 4 个测试按钮，调用 `window.api.panel.testReaction({ emotion, durationMs })`，主进程收到 `PANEL_TEST_REACTION` 后原样转发给宠物窗口 —— 这是验证每个情绪状态观感的标准方式，以后新增/调整表情也应该先在这里测试。
+- 单击宠物（非拖拽）目前会触发一个 1.2s 的 `happy` 反应（"摸它一下它会开心"），这是占位行为；M4 会用 `reactionEngine` 的真实规则替换/扩展这个反应来源。
 
 ## 里程碑与当前进度
 
-1. ✅ **M1**（已完成）— 裸透明悬浮窗 + 托盘：静态占位图（🌱 emoji）、可拖拽、托盘菜单、面板窗口双击可打开。已在真实 Windows 桌面上截图验证拖拽和双击开面板正常工作。
-2. ⏳ **M2** — 精灵动画状态机：2-3 个占位状态（idle/happy/stern），面板加临时"测试反应"按钮手动触发验证。
+1. ✅ **M1**（已完成）— 裸透明悬浮窗 + 托盘：可拖拽、托盘菜单、面板窗口双击可打开。已在真实 Windows 桌面上截图验证拖拽和双击开面板正常工作。
+2. ✅ **M2**（已完成）— 情绪状态机：`framer-motion` 驱动的可爱角色（`PetCharacter.tsx`），idle/happy/comfort/stern 四态，面板测试按钮手动触发，收到反应后自动播放并在 `durationMs` 后回到 idle。已逐个状态截图验证。
 3. ⏳ **M3** — 计划/打卡数据模型：`better-sqlite3` 接入，`PlansPage` 完整增删改。
 4. ⏳ **M4** — 文案库 + 规则引擎接入打卡：`MessagePoolsPage` + 种子文案，真正的完成率/连续天数计算，打卡真正触发のびちゃん反应。
 5. ⏳ **M5** — 主动提醒/通知：`node-schedule` 定时任务、原生通知、设置里可调提醒时间。
 6. ⏳ **M6** — `HistoryPage`、UI 打磨、`electron-builder` 双平台打包测试。
 
 每个里程碑都应该能独立用 `npm run dev` 跑起来验证，不要攒成一次性大版本再测试。
+
+## 版本控制
+
+- 本地已 `git init`，提交身份是**仓库级别**单独设置的 `user.name=MFF` / `user.email=xiaofeima600@gmail.com`（跟这台电脑全局 git 配置的公司邮箱不一样，只在这个仓库生效）。
+- **每完成一个里程碑/功能点，都要在验证通过后立刻本地 commit**，方便随时回退 —— 这是用户明确要求的工作习惯，不要攒到最后一起提交。
+- 远程仓库暂缓（用户还没决定托管平台），目前只做本地提交；等用户提供远程地址后再配置 `git remote add origin` 并推送。

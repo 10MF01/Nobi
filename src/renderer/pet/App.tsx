@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { PetCharacter } from './PetCharacter'
+import type { EmotionState } from '../../../shared/types'
 
 const DRAG_THRESHOLD_PX = 5
 
@@ -7,6 +9,22 @@ function App(): React.JSX.Element {
   const movedRef = useRef(false)
   const dragStartRef = useRef({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
+  const [emotion, setEmotion] = useState<EmotionState>('idle')
+
+  useEffect(() => {
+    let revertTimer: ReturnType<typeof setTimeout> | undefined
+
+    const unsubscribe = window.api.pet.onReaction(({ emotion: nextEmotion, durationMs }) => {
+      clearTimeout(revertTimer)
+      setEmotion(nextEmotion)
+      revertTimer = setTimeout(() => setEmotion('idle'), durationMs)
+    })
+
+    return () => {
+      clearTimeout(revertTimer)
+      unsubscribe()
+    }
+  }, [])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     draggingRef.current = true
@@ -65,21 +83,8 @@ function App(): React.JSX.Element {
         WebkitUserSelect: 'none'
       }}
     >
-      {/* placeholder のびちゃん — replaced by real sprite animation in M2 */}
-      <div
-        style={{
-          width: 140,
-          height: 140,
-          borderRadius: '50%',
-          background: 'radial-gradient(circle at 35% 30%, #fff6d8, #ffd76e 55%, #f4b400 100%)',
-          boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 48
-        }}
-      >
-        🌱
+      <div style={{ width: 160, height: 160 }}>
+        <PetCharacter emotion={emotion} />
       </div>
     </div>
   )
