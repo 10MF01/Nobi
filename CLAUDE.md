@@ -68,7 +68,7 @@ npm run build:mac           # 打包 macOS（dmg）
 - `src/main/ipc/handlers.ts` — 所有 `ipcMain.on/handle` 的注册点
 - `src/main/tray.ts` — 系统托盘图标与右键菜单
 - `src/main/store/`（M3 起）— `db.ts` 是 `better-sqlite3` 单例连接（懒加载，数据库文件在 `app.getPath('userData')/nobi.db`），启动时 `CREATE TABLE IF NOT EXISTS` 建表，没有做正式迁移框架；`repositories/planRepo.ts`、`repositories/checkinRepo.ts` 封装 SQL，对外只暴露 `shared/types.ts` 里的驼峰字段类型（repo 内部负责 snake_case 列名 ↔ 驼峰字段的转换）
-- `src/main/engine/`（M4 起）— `reactionEngine.ts` 规则引擎，接口是 `ReactionEngine { react(ctx: ReactionContext): ReactionResult }`，刻意保持零 Electron 依赖、可单测、可在未来替换成调用 Claude API 的动态生成版本而不改调用方
+- `src/main/engine/`（M4 起）— `reactionEngine.ts`/`streakCalculator.ts` 是纯函数，零 Electron/DB 依赖、可单测、未来可替换成调用 Claude API 的动态生成版本；`reactionCoordinator.ts` 负责把 repo 查询结果组装成两者需要的输入，并把结果通过 `petWindow.webContents.send` 推给宠物窗口，是主进程里唯一同时接触"纯引擎"和"Electron/DB"的胶水层
 - `src/main/scheduler/`（M5 起）— `node-schedule` 定时任务（中午提醒/晚间提醒/日终总结）
 
 ### 动画系统约定（M2 起生效，framer-motion 方案）
@@ -87,6 +87,17 @@ npm run build:mac           # 打包 macOS（dmg）
 - `src/renderer/panel/pages/PlansPage.tsx` 是当前面板的主页签（`App.tsx` 里做了一个极简的 tab 切换，"计划管理"/"测试反应"），四种类型固定分区展示，新建表单按所选类型动态显示星期多选或目标日期选择器；编辑走的是 `Modal + Form`弹窗（点"编辑"打开，`Form.setFieldsValue` 预填），不是行内编辑；删除包了一层 `Popconfirm` 二次确认。
 - **`better-sqlite3` 是原生模块，每次单独 `npm install` 新增/更新依赖后，如果 `npm run dev` 里报 `NODE_MODULE_VERSION` 不匹配（ERR_DLOPEN_FAILED），要手动跑一次 `npx electron-builder install-app-deps` 重新为 Electron 的 Node ABI 编译，然后完全杀掉旧的 electron 进程再 `npm run dev`（单纯 HMR 不会重新加载原生模块）。** postinstall 钩子理论上会自动做这件事，但实测在同一次 `npm install <pkg>` 里未必生效，遇到该报错时优先假设是这个原因。
 
+### 文案库与规则引擎（M4 起生效）
+
+- `shared/types.ts` 新增 `MessageCategory = 'encourage' | 'comfort' | 'stern' | 'celebrate' | 'neutral'`（前四种对应 `reactionEngine` 的规则输出，`neutral` 预留给 M5 的主动提醒等非完成率触发场景，目前只在文案库 CRUD 里可见）、`MessagePoolEntry`/`MessagePoolInput`，以及 `ReactionContext`/`ReactionResult`/`ReactionEngine` 接口。`message_pools` 表结构和 `plans`/`check_ins` 一样走 `CREATE TABLE IF NOT EXISTS`，首次启动通过 `src/main/store/seedMessages.ts`（35 条种子文案，5 类各 7 条）自动导入，判断依据是表为空（`seedMessagePoolsIfEmpty`），不是正式迁移框架。
+- `src/main/engine/reactionEngine.ts` 是纯函数模块（零 Electron/DB 依赖，符合最初设计的"可单测、未来可替换成调用 Claude API"的要求）：`decideCategory` 按"完成率 + 连续天数 + 是否刚断连续记录"决定 `MessageCategory`，再从 `ctx.pool`（调用方传入的已启用文案）里按 `lastUsedAt` 最早的 3 条中随机挑一条，避免文案频繁重复也避免死板轮询。`trigger: 'goal_done'`（完成 countdown/one_off）会直接短路到 `celebrate`，不看完成率。
+- `src/main/engine/streakCalculator.ts` 也是纯函数（`computeDailyStats`），但通过参数注入的方式接收"某天打卡了哪些计划 id""某天是星期几""日期偏移"这些回调，而不是直接 import dayjs 之外的任何 Electron/DB 代码——真正的数据组装和 dayjs 日期运算放在下面的 coordinator 里。连续天数的口径：从目标日期往前数，每天"完成率是否 ≥ 0.8"，不适用的类型（当天没有 applicable 的 daily/weekly 计划）跳过、不计入也不打断连续。
+- `src/main/engine/reactionCoordinator.ts` 是唯一同时依赖 Electron（`BrowserWindow`）+ repo 层 + 上面两个纯引擎的地方：`triggerCheckinReaction(petWindow, date)` 在打卡（非取消打卡）后被调用，一次性拉出最近 60 天的 check_ins 组装成 `Map<date, Set<planId>>` 避免逐天查询，算出今天和昨天的 `DailyStats`（`justBrokeStreak = 昨天有连续记录 && 今天完成率 < 0.4`），再调用 `reactionEngine.react`；`triggerGoalDoneReaction(petWindow)` 给 countdown/one_off 的"标记完成"用，直接走 `celebrate` 分支。选中的文案会调用 `messagePoolRepo.markMessageUsed` 更新 `lastUsedAt`。
+- IPC 层：`CHECKINS_TOGGLE`/`PLANS_SET_DONE` 的 handler 在写库成功后，仅当"变成已完成"（不是取消勾选）时才调用对应的 coordinator 函数——取消打卡/取消完成不触发反应。`PetReactionPayload` 新增了可选的 `message?: string` 字段，宠物渲染进程收到后连同 `emotion`/`durationMs` 一起消费。
+- 宠物窗口从 220×220 放大到 260×300（`src/main/windows/petWindow.ts`），角色本体改成贴底部对齐（`alignItems: 'flex-end'`）而不是居中，这样情绪反应的气泡文案（`src/renderer/pet/MessageBubble.tsx`，`framer-motion` 的 `AnimatePresence` 做淡入淡出）能在角色上方展开而不被窗口边界裁切；窗口锚点算法不变（右下角 margin 不变），只是往上"长高"。
+- 面板新增"文案库"标签页（`src/renderer/panel/pages/MessagePoolsPage.tsx`），用 `Tabs` 按 `MessageCategory` 分组，每组一个 `Switch` 控制启用/停用 + 行内编辑（点"编辑"切成 `TextArea`，点"保存"提交）+ `Popconfirm` 删除，风格和 `PlansPage` 保持一致。
+- 已在真实 Windows 桌面验证：勾选每日计划打卡后，のびちゃん 正确切换到 happy 情绪并弹出从种子文案库里选中的一条鼓励语气泡（气泡随情绪动画一起在 `durationMs` 后消失）；文案库页面能看到 5 个分类各 7 条种子文案，开关/编辑/删除入口渲染正常。
+
 ### 面板 UI 组件库约定（Ant Design，M3 后接入）
 
 - `src/renderer/panel/App.tsx` 顶层包一层 `ConfigProvider`，`theme.token` 里定义了品牌主题色：`colorPrimary: '#3f9b54'`（森绿，呼应のびちゃん本身的配色，不是 Ant Design 默认的靛蓝），以及 `colorBgLayout`/`colorBorder`/`fontFamily`（CJK 字体栈 `PingFang SC`/`Microsoft YaHei UI` 优先）。以后调整面板整体配色，改这里的 token 就行，不用满页面找内联样式。同时传了 `locale={zhCN}`（`antd/locale/zh_CN`），保证 `DatePicker`/`Popconfirm` 等内置文案是中文。
@@ -99,7 +110,7 @@ npm run build:mac           # 打包 macOS（dmg）
 1. ✅ **M1**（已完成）— 裸透明悬浮窗 + 托盘：可拖拽、托盘菜单、面板窗口双击可打开。已在真实 Windows 桌面上截图验证拖拽和双击开面板正常工作。
 2. ✅ **M2**（已完成）— 情绪状态机：`framer-motion` 驱动的可爱角色（`PetCharacter.tsx`），idle/happy/comfort/stern 四态，面板测试按钮手动触发，收到反应后自动播放并在 `durationMs` 后回到 idle。已逐个状态截图验证。
 3. ✅ **M3**（已完成）— 计划/打卡数据模型：`better-sqlite3` 接入（`src/main/store/`），`PlansPage` 完整支持四种计划类型的增删改查、打卡/完成勾选、行内编辑。已在真实 Windows 桌面上创建四种类型的计划、勾选打卡/完成、编辑标题、删除，并**完全重启应用**验证数据正确持久化（sqlite 文件在 userData 目录，不是内存态）。
-4. ⏳ **M4** — 文案库 + 规则引擎接入打卡：`MessagePoolsPage` + 种子文案，真正的完成率/连续天数计算，打卡真正触发のびちゃん反应。
+4. ✅ **M4**（已完成）— 文案库 + 规则引擎接入打卡：`message_pools` 表 + 35 条种子文案、纯函数 `reactionEngine`/`streakCalculator` + 依赖二者的 `reactionCoordinator`，打卡/完成目标真正触发のびちゃん情绪反应 + 气泡文案。已在真实 Windows 桌面上验证打卡后正确弹出对应情绪与文案，文案库页面 CRUD 正常。
 5. ⏳ **M5** — 主动提醒/通知：`node-schedule` 定时任务、原生通知、设置里可调提醒时间。
 6. ⏳ **M6** — `HistoryPage`、UI 打磨、`electron-builder` 双平台打包测试。
 

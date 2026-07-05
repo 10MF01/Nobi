@@ -3,6 +3,7 @@ import { Button, ConfigProvider, Layout, Space, Tabs, Typography } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import type { EmotionState } from '../../../shared/types'
 import { PlansPage } from './pages/PlansPage'
+import { MessagePoolsPage } from './pages/MessagePoolsPage'
 
 const { Content } = Layout
 const { Title } = Typography
@@ -52,6 +53,7 @@ function App(): React.JSX.Element {
             onChange={setTab}
             items={[
               { key: 'plans', label: '计划管理', children: <PlansPage /> },
+              { key: 'messages', label: '文案库', children: <MessagePoolsPage /> },
               {
                 key: 'test',
                 label: '测试反应',

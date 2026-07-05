@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PetCharacter } from './PetCharacter'
+import { MessageBubble } from './MessageBubble'
 import type { EmotionState } from '../../../shared/types'
 
 const DRAG_THRESHOLD_PX = 5
@@ -10,15 +11,22 @@ function App(): React.JSX.Element {
   const dragStartRef = useRef({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [emotion, setEmotion] = useState<EmotionState>('idle')
+  const [message, setMessage] = useState<string | null>(null)
 
   useEffect(() => {
     let revertTimer: ReturnType<typeof setTimeout> | undefined
 
-    const unsubscribe = window.api.pet.onReaction(({ emotion: nextEmotion, durationMs }) => {
-      clearTimeout(revertTimer)
-      setEmotion(nextEmotion)
-      revertTimer = setTimeout(() => setEmotion('idle'), durationMs)
-    })
+    const unsubscribe = window.api.pet.onReaction(
+      ({ emotion: nextEmotion, durationMs, message: nextMessage }) => {
+        clearTimeout(revertTimer)
+        setEmotion(nextEmotion)
+        setMessage(nextMessage ?? null)
+        revertTimer = setTimeout(() => {
+          setEmotion('idle')
+          setMessage(null)
+        }, durationMs)
+      }
+    )
 
     return () => {
       clearTimeout(revertTimer)
@@ -76,14 +84,15 @@ function App(): React.JSX.Element {
         width: '100%',
         height: '100%',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-end',
         justifyContent: 'center',
         cursor: isDragging ? 'grabbing' : 'grab',
         userSelect: 'none',
         WebkitUserSelect: 'none'
       }}
     >
-      <div style={{ width: 160, height: 160 }}>
+      <div style={{ width: 160, height: 160, position: 'relative' }}>
+        <MessageBubble message={message} />
         <PetCharacter emotion={emotion} />
       </div>
     </div>

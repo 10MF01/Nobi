@@ -1,6 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../../shared/ipcChannels'
-import type { PetReactionPayload, PlanInput } from '../../../shared/types'
+import type { MessagePoolInput, PetReactionPayload, PlanInput } from '../../../shared/types'
 import { openPanelWindow } from '../windows/panelWindow'
 import {
   listPlans,
@@ -10,6 +10,14 @@ import {
   setPlanDone
 } from '../store/repositories/planRepo'
 import { listCheckInsForDate, toggleCheckIn } from '../store/repositories/checkinRepo'
+import {
+  listMessages,
+  createMessage,
+  updateMessage,
+  deleteMessage,
+  setMessageActive
+} from '../store/repositories/messagePoolRepo'
+import { triggerCheckinReaction, triggerGoalDoneReaction } from '../engine/reactionCoordinator'
 
 export function registerIpcHandlers(petWindow: BrowserWindow): void {
   let dragOrigin: { x: number; y: number } | null = null
@@ -51,15 +59,40 @@ export function registerIpcHandlers(petWindow: BrowserWindow): void {
 
   ipcMain.handle(IPC_CHANNELS.PLANS_DELETE, (_event, id: number) => deletePlan(id))
 
-  ipcMain.handle(IPC_CHANNELS.PLANS_SET_DONE, (_event, id: number, isDone: boolean) =>
-    setPlanDone(id, isDone)
-  )
+  ipcMain.handle(IPC_CHANNELS.PLANS_SET_DONE, (_event, id: number, isDone: boolean) => {
+    const plan = setPlanDone(id, isDone)
+    if (isDone) {
+      triggerGoalDoneReaction(petWindow)
+    }
+    return plan
+  })
 
   ipcMain.handle(IPC_CHANNELS.CHECKINS_LIST_FOR_DATE, (_event, date: string) =>
     listCheckInsForDate(date)
   )
 
-  ipcMain.handle(IPC_CHANNELS.CHECKINS_TOGGLE, (_event, planId: number, date: string) =>
-    toggleCheckIn(planId, date)
+  ipcMain.handle(IPC_CHANNELS.CHECKINS_TOGGLE, (_event, planId: number, date: string) => {
+    const result = toggleCheckIn(planId, date)
+    if (result) {
+      triggerCheckinReaction(petWindow, date)
+    }
+    return result
+  })
+
+  ipcMain.handle(IPC_CHANNELS.MESSAGES_LIST, () => listMessages())
+
+  ipcMain.handle(IPC_CHANNELS.MESSAGES_CREATE, (_event, input: MessagePoolInput) =>
+    createMessage(input)
+  )
+
+  ipcMain.handle(
+    IPC_CHANNELS.MESSAGES_UPDATE,
+    (_event, id: number, input: Partial<MessagePoolInput>) => updateMessage(id, input)
+  )
+
+  ipcMain.handle(IPC_CHANNELS.MESSAGES_DELETE, (_event, id: number) => deleteMessage(id))
+
+  ipcMain.handle(IPC_CHANNELS.MESSAGES_SET_ACTIVE, (_event, id: number, isActive: boolean) =>
+    setMessageActive(id, isActive)
   )
 }

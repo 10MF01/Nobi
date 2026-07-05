@@ -1,7 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC_CHANNELS } from '../../shared/ipcChannels'
-import type { CheckIn, PetReactionPayload, Plan, PlanInput } from '../../shared/types'
+import type {
+  CheckIn,
+  MessagePoolEntry,
+  MessagePoolInput,
+  PetReactionPayload,
+  Plan,
+  PlanInput
+} from '../../shared/types'
 
 // Custom APIs for renderer
 const api = {
@@ -37,6 +44,16 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.CHECKINS_LIST_FOR_DATE, date),
     toggle: (planId: number, date: string): Promise<CheckIn | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.CHECKINS_TOGGLE, planId, date)
+  },
+  messages: {
+    list: (): Promise<MessagePoolEntry[]> => ipcRenderer.invoke(IPC_CHANNELS.MESSAGES_LIST),
+    create: (input: MessagePoolInput): Promise<MessagePoolEntry> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MESSAGES_CREATE, input),
+    update: (id: number, input: Partial<MessagePoolInput>): Promise<MessagePoolEntry> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MESSAGES_UPDATE, id, input),
+    delete: (id: number): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.MESSAGES_DELETE, id),
+    setActive: (id: number, isActive: boolean): Promise<MessagePoolEntry> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MESSAGES_SET_ACTIVE, id, isActive)
   }
 }
 

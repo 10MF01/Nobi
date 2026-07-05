@@ -2,8 +2,9 @@ import { BrowserWindow, screen } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 
-const PET_WIDTH = 220
-const PET_HEIGHT = 220
+const PET_WIDTH = 260
+// 比角色本体高不少，给情绪反应的气泡文案留出上方空间（不会被窗口边缘裁切）
+const PET_HEIGHT = 300
 const MARGIN = 40
 
 export function createPetWindow(): BrowserWindow {

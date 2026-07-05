@@ -11,5 +11,10 @@ export const IPC_CHANNELS = {
   PLANS_DELETE: 'plans:delete',
   PLANS_SET_DONE: 'plans:set-done',
   CHECKINS_LIST_FOR_DATE: 'checkins:list-for-date',
-  CHECKINS_TOGGLE: 'checkins:toggle'
+  CHECKINS_TOGGLE: 'checkins:toggle',
+  MESSAGES_LIST: 'messages:list',
+  MESSAGES_CREATE: 'messages:create',
+  MESSAGES_UPDATE: 'messages:update',
+  MESSAGES_DELETE: 'messages:delete',
+  MESSAGES_SET_ACTIVE: 'messages:set-active'
 } as const

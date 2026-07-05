@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join } from 'path'
 import Database from 'better-sqlite3'
+import { SEED_MESSAGES } from './seedMessages'
 
 let db: Database.Database | null = null
 
@@ -33,7 +34,36 @@ export function getDb(): Database.Database {
       completed_at TEXT NOT NULL,
       UNIQUE (plan_id, date)
     );
+
+    CREATE TABLE IF NOT EXISTS message_pools (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL CHECK (category IN ('encourage', 'comfort', 'stern', 'celebrate', 'neutral')),
+      text TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      last_used_at TEXT,
+      created_at TEXT NOT NULL
+    );
   `)
 
+  seedMessagePoolsIfEmpty(db)
+
   return db
+}
+
+function seedMessagePoolsIfEmpty(database: Database.Database): void {
+  const { count } = database
+    .prepare<[], { count: number }>(`SELECT COUNT(*) AS count FROM message_pools`)
+    .get()!
+  if (count > 0) return
+
+  const now = new Date().toISOString()
+  const insert = database.prepare(
+    `INSERT INTO message_pools (category, text, is_active, created_at) VALUES (@category, @text, 1, @createdAt)`
+  )
+  const insertAll = database.transaction(() => {
+    for (const seed of SEED_MESSAGES) {
+      insert.run({ category: seed.category, text: seed.text, createdAt: now })
+    }
+  })
+  insertAll()
 }

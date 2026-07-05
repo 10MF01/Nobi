@@ -24,6 +24,14 @@ export function listCheckInsForDate(date: string): CheckIn[] {
   return rows.map(toCheckIn)
 }
 
+/** streakCalculator 计算连续天数用，一次性取出整个回溯区间避免逐天查询 */
+export function listCheckInsInRange(startDate: string, endDate: string): CheckIn[] {
+  const rows = getDb()
+    .prepare<[string, string], CheckInRow>(`SELECT * FROM check_ins WHERE date >= ? AND date <= ?`)
+    .all(startDate, endDate)
+  return rows.map(toCheckIn)
+}
+
 /** 已打卡则取消打卡返回 null，未打卡则新增打卡返回记录 —— 面板复选框直接绑定这个切换动作 */
 export function toggleCheckIn(planId: number, date: string): CheckIn | null {
   const db = getDb()
