@@ -3,6 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { IPC_CHANNELS } from '../../shared/ipcChannels'
 import type {
   CheckIn,
+  HistoryOverview,
   MessagePoolEntry,
   MessagePoolInput,
   PetReactionPayload,
@@ -63,6 +64,10 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.REMINDERS_SET_SETTINGS, settings),
     testNudge: (): void => ipcRenderer.send(IPC_CHANNELS.REMINDERS_TEST_NUDGE),
     testSummary: (): void => ipcRenderer.send(IPC_CHANNELS.REMINDERS_TEST_SUMMARY)
+  },
+  history: {
+    getOverview: (days: number): Promise<HistoryOverview> =>
+      ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_OVERVIEW, days)
   }
 }
 

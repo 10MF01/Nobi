@@ -88,10 +88,22 @@ export interface ReminderSettings {
   summaryTime: string
 }
 
-/** 日终总结快照，M6 HistoryPage 会用到 */
+/** 日终总结定时任务写入的快照日志，仅在任务实际触发的那天才有记录（应用没开着就不会有） */
 export interface DailySummary {
   date: string
   completionRate: number
   streak: number
   createdAt: string
+}
+
+/** HistoryPage 用的每日数据点：现算而非依赖 DailySummary 快照，保证即使某天没开应用也能补全历史。
+ * completionRate 为 null 表示当天没有 applicable 的 daily/weekly 计划（不是"0% 失败"，是"当天没有安排"）。 */
+export interface HistoryPoint {
+  date: string
+  completionRate: number | null
+}
+
+export interface HistoryOverview {
+  points: HistoryPoint[]
+  currentStreak: number
 }

@@ -31,6 +31,7 @@ import {
   triggerDailySummary
 } from '../engine/reactionCoordinator'
 import { rescheduleReminders } from '../scheduler/reminderScheduler'
+import { getHistoryOverview } from '../engine/historyService'
 
 export function registerIpcHandlers(petWindow: BrowserWindow): void {
   let dragOrigin: { x: number; y: number } | null = null
@@ -124,4 +125,8 @@ export function registerIpcHandlers(petWindow: BrowserWindow): void {
   ipcMain.on(IPC_CHANNELS.REMINDERS_TEST_SUMMARY, () => {
     triggerDailySummary(petWindow, dayjs().format('YYYY-MM-DD'))
   })
+
+  ipcMain.handle(IPC_CHANNELS.HISTORY_GET_OVERVIEW, (_event, days: number) =>
+    getHistoryOverview(days)
+  )
 }

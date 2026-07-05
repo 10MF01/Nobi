@@ -109,6 +109,20 @@ npm run build:mac           # 打包 macOS（dmg）
 - 面板新增"提醒设置"标签页（`src/renderer/panel/pages/ReminderSettingsPage.tsx`）：三行 `Switch + TimePicker`（`format='HH:mm'`，和 `PlansPage` 的 `DatePicker` 一样，`Dayjs` 只在表单层出现，`.format('HH:mm')` 之后才落到 IPC/DB）+ 保存按钮；下面单独一个"立即测试"区块，两个按钮直接调 `window.api.reminders.testNudge()`/`testSummary()`，不用等到设定的时间点也能验证真实的提醒/总结逻辑——这是刻意加的，因为定时任务本身很难在开发阶段"等出来"验证。
 - 已在真实 Windows 桌面验证：面板打开时正确读到默认提醒时间；点"测试：日终总结"后のびちゃん 弹出鼓励语气泡，同时右下角弹出 Windows 原生通知"今日总结 / 今天完成率 100%，连续 1 天达标。"；点"测试：打卡提醒"在当天已全部打卡的情况下正确保持静默（无气泡无通知），符合"不要过度打扰"的设计。
 
+### 历史记录（M6 起生效）
+
+- `shared/types.ts` 新增 `HistoryPoint { date, completionRate }`（`completionRate` 为 `null` 表示当天没有 applicable 的 daily/weekly 计划，不是"0% 失败"，两者在热力图上颜色不同）和 `HistoryOverview { points, currentStreak }`。
+- **`HistoryPage` 刻意不读 `daily_summaries` 表**，而是新增 `src/main/engine/historyService.ts` 的 `getHistoryOverview(days)`，复用 M4/M5 已有的纯函数 `computeDailyStats` 对最近 N 天逐天现算完成率——因为 `daily_summaries` 只在日终总结定时任务实际触发那天才有记录，如果电脑那天没开机/应用没跑，历史就会有洞；现算保证任何时候打开历史页都是完整、可信的。`daily_summaries` 表仍然保留、仍然每天写一行，只是单纯作为日志快照，不是历史页的数据来源。
+- 面板新增"历史记录"标签页（`src/renderer/panel/pages/HistoryPage.tsx`）：上方 `Statistic` 卡片显示当前连续达标天数和过去 42 天平均完成率，下方是一个 7 列日历热力图（`Tooltip` 悬浮显示具体日期和完成率），格子颜色用品牌绿按完成率插值透明度，"当天没有安排"的格子用虚线边框和透明背景区分，不会和"0% 完成"的格子混淆。
+- 已知简化：`hasApplicablePlans`/`computeDailyStats` 都不看 `plan.createdAt`，所以一个刚创建的 daily 计划在热力图上会让计划创建之前的历史日期也显示成"0%"而不是"当天没有安排"——这是延续 M4/M5 就有的简化（`streakCalculator` 从一开始就没有做"计划创建时间"感知），日历热力图只是把这个已有简化第一次可视化出来而已，不是本次新引入的 bug；对个人单用户场景影响很小（历史越久远的误报越不重要），但如果以后要修，需要同时改 `streakCalculator.ts` 的 `isApplicable` 并重新验证 M4/M5 的打卡反应逻辑不受影响。
+
+### 应用图标与打包配置清理（M6 起生效）
+
+- 默认的 electron-vite 脚手架图标（蓝色 Electron 原子标志）已替换成のびちゃん本体形象：`scripts/generate-icon.ps1` 是一次性生成脚本（不在构建流程里跑，只在需要重新生成图标时手动执行），用 .NET GDI+ 按 `PetCharacter.tsx` 的配色/比例画一个简化静态版のびちゃん（森绿圆角方形背景 + 两色身体 + 两片叶子 + 腮红 + 眯眼笑脸），输出 `build/icon.png`（1024×1024，打包用）和 `resources/icon.png`（512×512，托盘/通知用，`tray.ts` 里会再 resize 到 16×16）。
+- **不需要手工做 `.ico`/`.icns`**：electron-builder 自带图标转换工具（`app-builder-lib/out/util/iconConverter.js`），只要 `build/icon.png` 足够大（ico 要求 ≥256×256，icns 要求 ≥512×512），打包时会自动生成对应格式；旧的 `build/icon.ico`/`build/icon.icns`（脚手架默认图标转出来的）已删除，避免 electron-builder 优先复用旧文件而不是从新 PNG 重新生成。已通过 `npm run build:win` 实际验证：日志里有 `downloaded label=icons-bundle.tar.gz`，产物图标确认是新设计。
+- `electron-builder.yml` 清理：删掉了 mac `extendInfo` 里的摄像头/麦克风/文稿/下载 文件夹权限描述（脚手架默认值，Nobi 完全不用这些权限，留着只会让用户看到不相关的系统权限弹窗/Info.plist 条目却不知道为什么）；删掉了 `linux`/`appImage` 整段配置和 `package.json` 里的 `build:linux` 脚本（CLAUDE.md 锁定的目标平台从始至终是 Windows + Mac，没有 Linux）；删掉了指向 `https://example.com/auto-updates` 的占位 `publish` 配置（没有自动更新后端，留着这段没意义）；`mac.category` 补成了 `public.app-category.productivity`。`package.json` 的 `description`/`author`/`homepage` 也从脚手架占位值改成了真实信息。
+- **打包验证（仅 Windows，本机是 Windows 开发环境）**：`npm run build:win` 成功产出 `dist/nobi-1.0.0-setup.exe`；额外直接跑了 `dist/win-unpacked/nobi.exe`（不是走 nsis 安装包，是解包后的产物）做冒烟测试，确认脱离 `electron-vite dev` 的开发模式后 `better-sqlite3` 原生模块、asar 打包路径解析、托盘图标、面板所有页签都正常——用的是和 dev 模式相同的 userData 目录（因为 `appId`/`productName` 没变），所以看到的是同一份数据库，不是全新空状态，这是预期行为。**Mac 打包完全没有在本机测试过**——这台是 Windows 机器，`npm run build:mac` 从 Windows 生成的 Mac 产物不可信（尤其 `better-sqlite3` 是原生模块，必须在真正的 Mac 上 `npm install` 重新编译，`npmRebuild: false` 意味着打包时不会自动重编译，必须确保打包前那台 Mac 已经装过依赖）；只对 `electron-builder.yml` 的 mac 配置做了人工审查（entitlements、`notarize: false` 符合"个人使用暂不签名公证"的既定决策），真正验证需要等到有 Mac 环境的时候。
+
 ### 面板 UI 组件库约定（Ant Design，M3 后接入）
 
 - `src/renderer/panel/App.tsx` 顶层包一层 `ConfigProvider`，`theme.token` 里定义了品牌主题色：`colorPrimary: '#3f9b54'`（森绿，呼应のびちゃん本身的配色，不是 Ant Design 默认的靛蓝），以及 `colorBgLayout`/`colorBorder`/`fontFamily`（CJK 字体栈 `PingFang SC`/`Microsoft YaHei UI` 优先）。以后调整面板整体配色，改这里的 token 就行，不用满页面找内联样式。同时传了 `locale={zhCN}`（`antd/locale/zh_CN`），保证 `DatePicker`/`Popconfirm` 等内置文案是中文。
@@ -123,7 +137,7 @@ npm run build:mac           # 打包 macOS（dmg）
 3. ✅ **M3**（已完成）— 计划/打卡数据模型：`better-sqlite3` 接入（`src/main/store/`），`PlansPage` 完整支持四种计划类型的增删改查、打卡/完成勾选、行内编辑。已在真实 Windows 桌面上创建四种类型的计划、勾选打卡/完成、编辑标题、删除，并**完全重启应用**验证数据正确持久化（sqlite 文件在 userData 目录，不是内存态）。
 4. ✅ **M4**（已完成）— 文案库 + 规则引擎接入打卡：`message_pools` 表 + 35 条种子文案、纯函数 `reactionEngine`/`streakCalculator` + 依赖二者的 `reactionCoordinator`，打卡/完成目标真正触发のびちゃん情绪反应 + 气泡文案。已在真实 Windows 桌面上验证打卡后正确弹出对应情绪与文案，文案库页面 CRUD 正常。
 5. ✅ **M5**（已完成）— 主动提醒/通知：`node-schedule` 定时任务（中午/晚间提醒 + 日终总结）、原生通知（`Notification` API）、面板"提醒设置"页可调时间与开关并支持立即测试。已在真实 Windows 桌面上验证日终总结正确弹出情绪反应 + 系统通知，打卡提醒在无需提醒时正确保持静默。
-6. ⏳ **M6** — `HistoryPage`、UI 打磨、`electron-builder` 双平台打包测试。
+6. ✅ **M6**（已完成，Mac 打包待验证）— 历史记录页（现算完成率热力图 + 连续天数/平均完成率统计）、のびちゃん 品牌图标替换默认 Electron 图标、`electron-builder.yml` 清理无关配置（mac 权限描述、linux 目标、占位 publish）。已在真实 Windows 桌面验证历史页渲染/tooltip、托盘新图标；`npm run build:win` 成功产出安装包并对解包产物做过冒烟测试。Mac 打包因为本机是 Windows 环境，只审查了配置没有实测，等有 Mac 环境时需要补验证。
 
 每个里程碑都应该能独立用 `npm run dev` 跑起来验证，不要攒成一次性大版本再测试。
 
