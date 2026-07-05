@@ -21,5 +21,8 @@ export const IPC_CHANNELS = {
   REMINDERS_SET_SETTINGS: 'reminders:set-settings',
   REMINDERS_TEST_NUDGE: 'reminders:test-nudge',
   REMINDERS_TEST_SUMMARY: 'reminders:test-summary',
-  HISTORY_GET_OVERVIEW: 'history:get-overview'
+  HISTORY_GET_OVERVIEW: 'history:get-overview',
+  SETTINGS_GET_APP: 'settings:get-app',
+  SETTINGS_SET_APP: 'settings:set-app',
+  PET_APPEARANCE: 'pet:appearance'
 } as const

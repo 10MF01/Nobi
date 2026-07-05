@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC_CHANNELS } from '../../shared/ipcChannels'
 import type {
+  AppSettings,
   CheckIn,
   HistoryOverview,
   MessagePoolEntry,
@@ -24,6 +25,12 @@ const api = {
         callback(payload)
       ipcRenderer.on(IPC_CHANNELS.PET_REACTION, listener)
       return () => ipcRenderer.removeListener(IPC_CHANNELS.PET_REACTION, listener)
+    },
+    onAppearance: (callback: (payload: { scale: number }) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: { scale: number }): void =>
+        callback(payload)
+      ipcRenderer.on(IPC_CHANNELS.PET_APPEARANCE, listener)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.PET_APPEARANCE, listener)
     }
   },
   panel: {
@@ -68,6 +75,11 @@ const api = {
   history: {
     getOverview: (days: number): Promise<HistoryOverview> =>
       ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_OVERVIEW, days)
+  },
+  settings: {
+    getApp: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_APP),
+    setApp: (settings: AppSettings): Promise<AppSettings> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET_APP, settings)
   }
 }
 

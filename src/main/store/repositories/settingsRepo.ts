@@ -1,5 +1,5 @@
 import { getDb } from '../db'
-import type { ReminderSettings } from '../../../../shared/types'
+import type { AppSettings, ReminderSettings } from '../../../../shared/types'
 
 const REMINDER_SETTINGS_KEY = 'reminderSettings'
 
@@ -27,5 +27,31 @@ export function setReminderSettings(settings: ReminderSettings): ReminderSetting
        ON CONFLICT(key) DO UPDATE SET value = @value`
     )
     .run({ key: REMINDER_SETTINGS_KEY, value: JSON.stringify(settings) })
+  return settings
+}
+
+const APP_SETTINGS_KEY = 'appSettings'
+
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  launchAtStartup: false,
+  petScale: 1,
+  petOpacity: 1
+}
+
+export function getAppSettings(): AppSettings {
+  const row = getDb()
+    .prepare<[string], { value: string }>(`SELECT value FROM settings WHERE key = ?`)
+    .get(APP_SETTINGS_KEY)
+  if (!row) return DEFAULT_APP_SETTINGS
+  return { ...DEFAULT_APP_SETTINGS, ...JSON.parse(row.value) }
+}
+
+export function setAppSettings(settings: AppSettings): AppSettings {
+  getDb()
+    .prepare(
+      `INSERT INTO settings (key, value) VALUES (@key, @value)
+       ON CONFLICT(key) DO UPDATE SET value = @value`
+    )
+    .run({ key: APP_SETTINGS_KEY, value: JSON.stringify(settings) })
   return settings
 }

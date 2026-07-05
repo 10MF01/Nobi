@@ -88,6 +88,15 @@ export interface ReminderSettings {
   summaryTime: string
 }
 
+export interface AppSettings {
+  /** 实际生效状态以 app.getLoginItemSettings() 为准，这里存的是用户上次设置的意图 */
+  launchAtStartup: boolean
+  /** のびちゃん 形象整体缩放比例，1 = 默认大小 */
+  petScale: number
+  /** 悬浮窗整体透明度，1 = 不透明 */
+  petOpacity: number
+}
+
 /** 日终总结定时任务写入的快照日志，仅在任务实际触发的那天才有记录（应用没开着就不会有） */
 export interface DailySummary {
   date: string

@@ -4,6 +4,7 @@ import { MessageBubble } from './MessageBubble'
 import type { EmotionState } from '../../../shared/types'
 
 const DRAG_THRESHOLD_PX = 5
+const BASE_CHARACTER_SIZE = 160
 
 function App(): React.JSX.Element {
   const draggingRef = useRef(false)
@@ -12,6 +13,11 @@ function App(): React.JSX.Element {
   const [isDragging, setIsDragging] = useState(false)
   const [emotion, setEmotion] = useState<EmotionState>('idle')
   const [message, setMessage] = useState<string | null>(null)
+  const [scale, setScale] = useState(1)
+
+  useEffect(() => {
+    return window.api.pet.onAppearance(({ scale: nextScale }) => setScale(nextScale))
+  }, [])
 
   useEffect(() => {
     let revertTimer: ReturnType<typeof setTimeout> | undefined
@@ -91,7 +97,13 @@ function App(): React.JSX.Element {
         WebkitUserSelect: 'none'
       }}
     >
-      <div style={{ width: 160, height: 160, position: 'relative' }}>
+      <div
+        style={{
+          width: BASE_CHARACTER_SIZE * scale,
+          height: BASE_CHARACTER_SIZE * scale,
+          position: 'relative'
+        }}
+      >
         <MessageBubble message={message} />
         <PetCharacter emotion={emotion} />
       </div>

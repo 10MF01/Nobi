@@ -1,13 +1,15 @@
 import dayjs from 'dayjs'
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, app, BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../../shared/ipcChannels'
 import type {
+  AppSettings,
   MessagePoolInput,
   PetReactionPayload,
   PlanInput,
   ReminderSettings
 } from '../../../shared/types'
 import { openPanelWindow } from '../windows/panelWindow'
+import { applyPetAppearance } from '../windows/petWindow'
 import {
   listPlans,
   createPlan,
@@ -23,7 +25,12 @@ import {
   deleteMessage,
   setMessageActive
 } from '../store/repositories/messagePoolRepo'
-import { getReminderSettings, setReminderSettings } from '../store/repositories/settingsRepo'
+import {
+  getReminderSettings,
+  setReminderSettings,
+  getAppSettings,
+  setAppSettings
+} from '../store/repositories/settingsRepo'
 import {
   triggerCheckinReaction,
   triggerGoalDoneReaction,
@@ -131,4 +138,17 @@ export function registerIpcHandlers(petWindow: BrowserWindow): void {
   ipcMain.handle(IPC_CHANNELS.HISTORY_GET_OVERVIEW, (_event, days: number) =>
     getHistoryOverview(days)
   )
+
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET_APP, () => {
+    const settings = getAppSettings()
+    // 开机自启动的真实状态以系统登录项为准，避免和用户在系统设置里手动关掉的情况脱节
+    return { ...settings, launchAtStartup: app.getLoginItemSettings().openAtLogin }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET_APP, (_event, settings: AppSettings) => {
+    const saved = setAppSettings(settings)
+    app.setLoginItemSettings({ openAtLogin: settings.launchAtStartup })
+    applyPetAppearance(petWindow, saved)
+    return saved
+  })
 }

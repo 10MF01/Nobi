@@ -6,6 +6,7 @@ import { PlansPage } from './pages/PlansPage'
 import { MessagePoolsPage } from './pages/MessagePoolsPage'
 import { ReminderSettingsPage } from './pages/ReminderSettingsPage'
 import { HistoryPage } from './pages/HistoryPage'
+import { AppSettingsPage } from './pages/AppSettingsPage'
 
 const { Content } = Layout
 const { Title } = Typography
@@ -58,6 +59,7 @@ function App(): React.JSX.Element {
               { key: 'messages', label: '文案库', children: <MessagePoolsPage /> },
               { key: 'reminders', label: '提醒设置', children: <ReminderSettingsPage /> },
               { key: 'history', label: '历史记录', children: <HistoryPage /> },
+              { key: 'appSettings', label: '应用设置', children: <AppSettingsPage /> },
               {
                 key: 'test',
                 label: '测试反应',
