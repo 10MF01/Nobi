@@ -21,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 计划类型：每日/每周固定任务、长期目标/倒计时、临时/单次待办，三种都要支持
 - 互动时机：固定时间点主动提醒 + 用户随时手动打卡两种都要
 - 不引入账号系统/云同步/后端服务，纯本地单用户使用
-- 不引入 UI 组件库（如 MUI/Ant Design），面板用纯 React + 基础 CSS，降低维护成本
+- 面板 UI 组件库：**Ant Design（v6）**。这是 M3 完成后对最初"纯 React + 基础 CSS，不引入组件库"方案的修正——用户看了手写 CSS 的面板后明确表示不满意界面风格，要求接入成熟组件库；在 MUI 和 Ant Design 之间选了 **Ant Design**，原因是中文文档/社区讨论对用户自己后续查资料更友好。这与 [M2 的角色动画决策] 是同一类"为界面效果可以引入库，维护成本不是第一优先级"的取舍。
 
 ## 常用命令
 
@@ -84,8 +84,15 @@ npm run build:mac           # 打包 macOS（dmg）
 - `shared/types.ts` 定义 `PlanType = 'daily' | 'weekly' | 'countdown' | 'one_off'`、`Plan`、`PlanInput`、`CheckIn`。四种类型共用一张 `plans` 表（而不是每种类型单独建表），类型特有字段（`weekdays`、`targetDate`）对不适用的类型直接置 `null`——因为四种计划共享增删改+列表渲染逻辑的部分远大于差异部分。
 - `daily`/`weekly` 计划的"今天完成了没"由 `check_ins` 表判断（`UNIQUE(plan_id, date)`，同一天重复打卡即 toggle 取消），不占用 `plans.is_done`；`countdown`/`one_off` 相反，直接用 `plans.is_done` 表示达成/完成，不走 `check_ins`。两条判断路径不要混用。
 - IPC 走 `ipcMain.handle`/`ipcRenderer.invoke`（区别于 M1/M2 的 `on`/`send`），因为增删改查都需要返回值；`window.api.plans.*` 和 `window.api.checkIns.*` 是对应的 preload 封装。
-- `src/renderer/panel/pages/PlansPage.tsx` 是当前面板的主页签（`App.tsx` 里做了一个极简的 tab 切换，"计划管理"/"测试反应"），四种类型固定分区展示，新建表单按所选类型显示星期选择器或日期选择器；编辑走的是行内编辑（点"编辑"切换该行为输入框），不是弹窗。
+- `src/renderer/panel/pages/PlansPage.tsx` 是当前面板的主页签（`App.tsx` 里做了一个极简的 tab 切换，"计划管理"/"测试反应"），四种类型固定分区展示，新建表单按所选类型动态显示星期多选或目标日期选择器；编辑走的是 `Modal + Form`弹窗（点"编辑"打开，`Form.setFieldsValue` 预填），不是行内编辑；删除包了一层 `Popconfirm` 二次确认。
 - **`better-sqlite3` 是原生模块，每次单独 `npm install` 新增/更新依赖后，如果 `npm run dev` 里报 `NODE_MODULE_VERSION` 不匹配（ERR_DLOPEN_FAILED），要手动跑一次 `npx electron-builder install-app-deps` 重新为 Electron 的 Node ABI 编译，然后完全杀掉旧的 electron 进程再 `npm run dev`（单纯 HMR 不会重新加载原生模块）。** postinstall 钩子理论上会自动做这件事，但实测在同一次 `npm install <pkg>` 里未必生效，遇到该报错时优先假设是这个原因。
+
+### 面板 UI 组件库约定（Ant Design，M3 后接入）
+
+- `src/renderer/panel/App.tsx` 顶层包一层 `ConfigProvider`，`theme.token` 里定义了品牌主题色：`colorPrimary: '#3f9b54'`（森绿，呼应のびちゃん本身的配色，不是 Ant Design 默认的靛蓝），以及 `colorBgLayout`/`colorBorder`/`fontFamily`（CJK 字体栈 `PingFang SC`/`Microsoft YaHei UI` 优先）。以后调整面板整体配色，改这里的 token 就行，不用满页面找内联样式。同时传了 `locale={zhCN}`（`antd/locale/zh_CN`），保证 `DatePicker`/`Popconfirm` 等内置文案是中文。
+- 日期统一用 `dayjs`（Ant Design v6 默认日期库），`PlansPage.tsx` 里 `DatePicker` 的值和 `Plan.targetDate`（`YYYY-MM-DD` 字符串）之间要手动 `dayjs(str)` / `.format('YYYY-MM-DD')` 转换，数据库和 IPC 层只认字符串，不认 `Dayjs` 对象。
+- 正式决策前先做了一版**纯 HTML/CSS 静态设计预览**（Artifact，手工还原 Ant Design 视觉语言，两套配色对比）给用户确认方向，用户选定森绿配色后才正式动手改 `PlansPage.tsx`/`App.tsx` 的代码——以后再有较大的视觉改版，先出静态预览走一遍确认比直接改代码返工成本低。
+- `main.tsx` 里引入了 `antd/dist/reset.css` 做基础样式重置；`antd` 用的是 v6（对 React 19 原生兼容，不需要 `@ant-design/v5-patch-for-react-19` 这个只给 v5 用的兼容包）。
 
 ## 里程碑与当前进度
 

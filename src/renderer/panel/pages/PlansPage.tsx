@@ -1,5 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
+import {
+  Button,
+  Card,
+  Checkbox,
+  DatePicker,
+  Empty,
+  Form,
+  Input,
+  List,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Tag,
+  Typography
+} from 'antd'
+import dayjs, { type Dayjs } from 'dayjs'
 import type { Plan, PlanInput, PlanType } from '../../../../shared/types'
+
+const { Text } = Typography
 
 const TYPE_LABELS: Record<PlanType, string> = {
   daily: '每日任务',
@@ -10,58 +29,46 @@ const TYPE_LABELS: Record<PlanType, string> = {
 
 const TYPE_ORDER: PlanType[] = ['daily', 'weekly', 'countdown', 'one_off']
 const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六']
+const DATE_FORMAT = 'YYYY-MM-DD'
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  return dayjs().format(DATE_FORMAT)
 }
 
 function daysUntil(targetDate: string): number {
-  const target = new Date(`${targetDate}T00:00:00`)
-  const now = new Date(`${todayStr()}T00:00:00`)
-  return Math.round((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+  return dayjs(targetDate).startOf('day').diff(dayjs().startOf('day'), 'day')
 }
 
-interface EditDraft {
+interface AddFormValues {
+  type: PlanType
   title: string
-  note: string
-  weekdays: number[]
-  targetDate: string
+  note?: string
+  weekdays?: number[]
+  targetDate?: Dayjs
 }
 
-function toDraft(plan: Plan): EditDraft {
-  return {
-    title: plan.title,
-    note: plan.note ?? '',
-    weekdays: plan.weekdays ?? [],
-    targetDate: plan.targetDate ?? ''
-  }
+interface EditFormValues {
+  title: string
+  note?: string
+  weekdays?: number[]
+  targetDate?: Dayjs
+}
+
+function isCheckInType(type: PlanType): boolean {
+  return type === 'daily' || type === 'weekly'
 }
 
 export function PlansPage(): React.JSX.Element {
   const [plans, setPlans] = useState<Plan[]>([])
   const [checkedInIds, setCheckedInIds] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [editingPlan, setEditingPlan] = useState<Plan | null>(null)
 
-  const [newType, setNewType] = useState<PlanType>('daily')
-  const [newTitle, setNewTitle] = useState('')
-  const [newNote, setNewNote] = useState('')
-  const [newWeekdays, setNewWeekdays] = useState<number[]>([])
-  const [newTargetDate, setNewTargetDate] = useState('')
-
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
+  const [addForm] = Form.useForm<AddFormValues>()
+  const [editForm] = Form.useForm<EditFormValues>()
+  const addType = Form.useWatch('type', addForm)
 
   const today = useMemo(() => todayStr(), [])
-
-  async function reload(): Promise<void> {
-    const [planList, checkIns] = await Promise.all([
-      window.api.plans.list(),
-      window.api.checkIns.listForDate(today)
-    ])
-    setPlans(planList)
-    setCheckedInIds(new Set(checkIns.map((c) => c.planId)))
-    setLoading(false)
-  }
 
   useEffect(() => {
     let ignore = false
@@ -78,21 +85,28 @@ export function PlansPage(): React.JSX.Element {
     }
   }, [today])
 
-  async function handleCreate(): Promise<void> {
-    if (!newTitle.trim()) return
+  async function reload(): Promise<void> {
+    const [planList, checkIns] = await Promise.all([
+      window.api.plans.list(),
+      window.api.checkIns.listForDate(today)
+    ])
+    setPlans(planList)
+    setCheckedInIds(new Set(checkIns.map((c) => c.planId)))
+  }
+
+  async function handleCreate(values: AddFormValues): Promise<void> {
     const input: PlanInput = {
-      type: newType,
-      title: newTitle.trim(),
-      note: newNote.trim() || null,
-      weekdays: newType === 'weekly' ? newWeekdays : null,
-      targetDate: newType === 'countdown' ? newTargetDate || null : null
+      type: values.type,
+      title: values.title.trim(),
+      note: values.note?.trim() || null,
+      weekdays: values.type === 'weekly' ? (values.weekdays ?? []) : null,
+      targetDate:
+        values.type === 'countdown' ? (values.targetDate?.format(DATE_FORMAT) ?? null) : null
     }
-    if (newType === 'countdown' && !newTargetDate) return
     await window.api.plans.create(input)
-    setNewTitle('')
-    setNewNote('')
-    setNewWeekdays([])
-    setNewTargetDate('')
+    const keepType = values.type
+    addForm.resetFields()
+    addForm.setFieldValue('type', keepType)
     await reload()
   }
 
@@ -111,294 +125,208 @@ export function PlansPage(): React.JSX.Element {
     await reload()
   }
 
-  function startEdit(plan: Plan): void {
-    setEditingId(plan.id)
-    setEditDraft(toDraft(plan))
-  }
-
-  function cancelEdit(): void {
-    setEditingId(null)
-    setEditDraft(null)
-  }
-
-  async function saveEdit(plan: Plan): Promise<void> {
-    if (!editDraft || !editDraft.title.trim()) return
-    await window.api.plans.update(plan.id, {
-      title: editDraft.title.trim(),
-      note: editDraft.note.trim() || null,
-      weekdays: plan.type === 'weekly' ? editDraft.weekdays : null,
-      targetDate: plan.type === 'countdown' ? editDraft.targetDate || null : null
+  function openEdit(plan: Plan): void {
+    setEditingPlan(plan)
+    editForm.setFieldsValue({
+      title: plan.title,
+      note: plan.note ?? '',
+      weekdays: plan.weekdays ?? [],
+      targetDate: plan.targetDate ? dayjs(plan.targetDate) : undefined
     })
-    cancelEdit()
+  }
+
+  async function handleSaveEdit(values: EditFormValues): Promise<void> {
+    if (!editingPlan) return
+    await window.api.plans.update(editingPlan.id, {
+      title: values.title.trim(),
+      note: values.note?.trim() || null,
+      weekdays: editingPlan.type === 'weekly' ? (values.weekdays ?? []) : null,
+      targetDate:
+        editingPlan.type === 'countdown' ? (values.targetDate?.format(DATE_FORMAT) ?? null) : null
+    })
+    setEditingPlan(null)
     await reload()
   }
 
-  function toggleWeekday(list: number[], day: number, setList: (next: number[]) => void): void {
-    setList(list.includes(day) ? list.filter((d) => d !== day) : [...list, day].sort())
-  }
-
-  if (loading) return <p>加载中...</p>
+  if (loading) return <Text type="secondary">加载中...</Text>
 
   return (
     <div>
-      <section
-        style={{
-          border: '1px solid #e0e0e0',
-          borderRadius: 10,
-          padding: 16,
-          marginBottom: 24,
-          background: '#fafafa'
-        }}
-      >
-        <h2 style={{ fontSize: 16, marginTop: 0 }}>+ 添加计划</h2>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <select value={newType} onChange={(e) => setNewType(e.target.value as PlanType)}>
-            {TYPE_ORDER.map((t) => (
-              <option key={t} value={t}>
-                {TYPE_LABELS[t]}
-              </option>
-            ))}
-          </select>
-          <input
-            placeholder="标题"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            style={{ flex: 1, minWidth: 160, padding: 6 }}
-          />
-          <input
-            placeholder="备注（可选）"
-            value={newNote}
-            onChange={(e) => setNewNote(e.target.value)}
-            style={{ flex: 1, minWidth: 160, padding: 6 }}
-          />
-        </div>
+      <Card title="+ 添加计划" style={{ marginBottom: 20 }}>
+        <Form<AddFormValues>
+          form={addForm}
+          layout="vertical"
+          initialValues={{ type: 'daily', weekdays: [] }}
+          onFinish={handleCreate}
+        >
+          <Space align="start" wrap size={12}>
+            <Form.Item name="type" label="类型" style={{ width: 176, marginBottom: 12 }}>
+              <Select options={TYPE_ORDER.map((t) => ({ value: t, label: TYPE_LABELS[t] }))} />
+            </Form.Item>
+            <Form.Item
+              name="title"
+              label="标题"
+              rules={[{ required: true, message: '请输入标题' }]}
+              style={{ width: 240, marginBottom: 12 }}
+            >
+              <Input placeholder="标题" />
+            </Form.Item>
+            <Form.Item name="note" label="备注（可选）" style={{ width: 240, marginBottom: 12 }}>
+              <Input placeholder="备注（可选）" />
+            </Form.Item>
+          </Space>
 
-        {newType === 'weekly' && (
-          <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
-            {WEEKDAY_LABELS.map((label, day) => (
-              <button
-                key={day}
-                type="button"
-                onClick={() => toggleWeekday(newWeekdays, day, setNewWeekdays)}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: '50%',
-                  border: '1px solid #ccc',
-                  background: newWeekdays.includes(day) ? '#6fbf73' : '#fff',
-                  color: newWeekdays.includes(day) ? '#fff' : '#333',
-                  cursor: 'pointer'
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+          {addType === 'weekly' && (
+            <Form.Item name="weekdays" label="每周星期">
+              <Checkbox.Group>
+                <Space wrap>
+                  {WEEKDAY_LABELS.map((label, day) => (
+                    <Checkbox key={day} value={day}>
+                      {label}
+                    </Checkbox>
+                  ))}
+                </Space>
+              </Checkbox.Group>
+            </Form.Item>
+          )}
 
-        {newType === 'countdown' && (
-          <div style={{ marginTop: 8 }}>
-            <input
-              type="date"
-              value={newTargetDate}
-              onChange={(e) => setNewTargetDate(e.target.value)}
-              style={{ padding: 6 }}
-            />
-          </div>
-        )}
+          {addType === 'countdown' && (
+            <Form.Item
+              name="targetDate"
+              label="目标日期"
+              rules={[{ required: true, message: '请选择目标日期' }]}
+            >
+              <DatePicker />
+            </Form.Item>
+          )}
 
-        <div style={{ marginTop: 12 }}>
-          <button
-            onClick={handleCreate}
-            style={{
-              padding: '6px 16px',
-              borderRadius: 8,
-              border: 'none',
-              background: '#4fa955',
-              color: '#fff',
-              cursor: 'pointer'
-            }}
-          >
-            添加
-          </button>
-        </div>
-      </section>
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Button type="primary" htmlType="submit">
+              添加
+            </Button>
+          </Form.Item>
+        </Form>
+      </Card>
 
       {TYPE_ORDER.map((type) => {
         const group = plans.filter((p) => p.type === type)
         return (
-          <section key={type} style={{ marginBottom: 20 }}>
-            <h2 style={{ fontSize: 15, color: '#555' }}>{TYPE_LABELS[type]}</h2>
-            {group.length === 0 && <p style={{ color: '#999', fontSize: 13 }}>暂无计划</p>}
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {group.map((plan) => {
-                const isEditing = editingId === plan.id
-                return (
-                  <li
-                    key={plan.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 10,
-                      padding: '8px 10px',
-                      border: '1px solid #eee',
-                      borderRadius: 8,
-                      marginBottom: 6,
-                      background: '#fff'
-                    }}
-                  >
-                    {(type === 'daily' || type === 'weekly') && (
-                      <input
-                        type="checkbox"
-                        checked={checkedInIds.has(plan.id)}
-                        onChange={() => handleToggleCheckIn(plan.id)}
-                        style={{ marginTop: 4 }}
-                      />
-                    )}
-                    {(type === 'countdown' || type === 'one_off') && (
-                      <input
-                        type="checkbox"
-                        checked={plan.isDone}
-                        onChange={() => handleToggleDone(plan)}
-                        style={{ marginTop: 4 }}
-                      />
-                    )}
-
-                    <div style={{ flex: 1 }}>
-                      {isEditing && editDraft ? (
-                        <div>
-                          <input
-                            value={editDraft.title}
-                            onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })}
-                            style={{ padding: 4, marginRight: 6 }}
-                          />
-                          <input
-                            placeholder="备注"
-                            value={editDraft.note}
-                            onChange={(e) => setEditDraft({ ...editDraft, note: e.target.value })}
-                            style={{ padding: 4 }}
-                          />
-                          {type === 'weekly' && (
-                            <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
-                              {WEEKDAY_LABELS.map((label, day) => (
-                                <button
-                                  key={day}
-                                  type="button"
-                                  onClick={() =>
-                                    toggleWeekday(editDraft.weekdays, day, (next) =>
-                                      setEditDraft({ ...editDraft, weekdays: next })
-                                    )
-                                  }
-                                  style={{
-                                    width: 28,
-                                    height: 28,
-                                    borderRadius: '50%',
-                                    border: '1px solid #ccc',
-                                    background: editDraft.weekdays.includes(day)
-                                      ? '#6fbf73'
-                                      : '#fff',
-                                    color: editDraft.weekdays.includes(day) ? '#fff' : '#333',
-                                    cursor: 'pointer'
-                                  }}
-                                >
-                                  {label}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                          {type === 'countdown' && (
-                            <input
-                              type="date"
-                              value={editDraft.targetDate}
-                              onChange={(e) =>
-                                setEditDraft({ ...editDraft, targetDate: e.target.value })
-                              }
-                              style={{ marginTop: 6, padding: 4 }}
-                            />
-                          )}
-                        </div>
-                      ) : (
-                        <div>
-                          <div
-                            style={{
-                              fontWeight: 500,
-                              textDecoration: plan.isDone ? 'line-through' : 'none',
-                              color: plan.isDone ? '#999' : '#333'
-                            }}
-                          >
-                            {plan.title}
-                          </div>
-                          {plan.note && (
-                            <div style={{ fontSize: 12, color: '#888' }}>{plan.note}</div>
-                          )}
-                          {type === 'weekly' && plan.weekdays && plan.weekdays.length > 0 && (
-                            <div style={{ fontSize: 12, color: '#6fbf73' }}>
-                              每周 {plan.weekdays.map((d) => WEEKDAY_LABELS[d]).join('、')}
-                            </div>
-                          )}
-                          {type === 'countdown' && plan.targetDate && (
-                            <div style={{ fontSize: 12, color: '#e08a3c' }}>
-                              目标日期 {plan.targetDate}（
-                              {daysUntil(plan.targetDate) >= 0
-                                ? `还剩 ${daysUntil(plan.targetDate)} 天`
-                                : `已过期 ${-daysUntil(plan.targetDate)} 天`}
-                              ）
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {isEditing ? (
-                        <>
-                          <button
-                            onClick={() => saveEdit(plan)}
-                            style={smallButtonStyle('#4fa955', '#fff')}
-                          >
-                            保存
-                          </button>
-                          <button onClick={cancelEdit} style={smallButtonStyle('#fff', '#333')}>
-                            取消
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => startEdit(plan)}
-                            style={smallButtonStyle('#fff', '#333')}
-                          >
-                            编辑
-                          </button>
-                          <button
-                            onClick={() => handleDelete(plan.id)}
-                            style={smallButtonStyle('#fff', '#c0392b')}
-                          >
+          <Card
+            key={type}
+            title={`${TYPE_LABELS[type]} (${group.length})`}
+            style={{ marginBottom: 16 }}
+          >
+            {group.length === 0 ? (
+              <Empty description="暂无计划" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <List
+                dataSource={group}
+                renderItem={(plan) => {
+                  const checked = isCheckInType(type) ? checkedInIds.has(plan.id) : plan.isDone
+                  return (
+                    <List.Item
+                      actions={[
+                        <Button key="edit" type="text" size="small" onClick={() => openEdit(plan)}>
+                          编辑
+                        </Button>,
+                        <Popconfirm
+                          key="delete"
+                          title="确定删除这条计划吗？"
+                          okText="删除"
+                          okButtonProps={{ danger: true }}
+                          cancelText="取消"
+                          onConfirm={() => handleDelete(plan.id)}
+                        >
+                          <Button type="text" size="small" danger>
                             删除
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          </section>
+                          </Button>
+                        </Popconfirm>
+                      ]}
+                    >
+                      <Space align="start">
+                        <Checkbox
+                          checked={checked}
+                          onChange={() =>
+                            isCheckInType(type)
+                              ? handleToggleCheckIn(plan.id)
+                              : handleToggleDone(plan)
+                          }
+                        />
+                        <div>
+                          <Text delete={plan.isDone}>{plan.title}</Text>
+                          <div style={{ marginTop: 4 }}>
+                            {plan.note && (
+                              <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+                                {plan.note}
+                              </Text>
+                            )}
+                            {type === 'weekly' && plan.weekdays && plan.weekdays.length > 0 && (
+                              <Tag color="success">
+                                每周 {plan.weekdays.map((d) => WEEKDAY_LABELS[d]).join('、')}
+                              </Tag>
+                            )}
+                            {type === 'countdown' && plan.targetDate && (
+                              <Space size={4}>
+                                <Tag color="success">目标日期 {plan.targetDate}</Tag>
+                                <Tag color="warning">
+                                  {daysUntil(plan.targetDate) >= 0
+                                    ? `还剩 ${daysUntil(plan.targetDate)} 天`
+                                    : `已过期 ${-daysUntil(plan.targetDate)} 天`}
+                                </Tag>
+                              </Space>
+                            )}
+                          </div>
+                        </div>
+                      </Space>
+                    </List.Item>
+                  )
+                }}
+              />
+            )}
+          </Card>
         )
       })}
+
+      <Modal
+        title="编辑计划"
+        open={editingPlan !== null}
+        onCancel={() => setEditingPlan(null)}
+        onOk={() => editForm.submit()}
+        okText="保存"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <Form<EditFormValues> form={editForm} layout="vertical" onFinish={handleSaveEdit}>
+          <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="note" label="备注">
+            <Input />
+          </Form.Item>
+          {editingPlan?.type === 'weekly' && (
+            <Form.Item name="weekdays" label="每周星期">
+              <Checkbox.Group>
+                <Space wrap>
+                  {WEEKDAY_LABELS.map((label, day) => (
+                    <Checkbox key={day} value={day}>
+                      {label}
+                    </Checkbox>
+                  ))}
+                </Space>
+              </Checkbox.Group>
+            </Form.Item>
+          )}
+          {editingPlan?.type === 'countdown' && (
+            <Form.Item
+              name="targetDate"
+              label="目标日期"
+              rules={[{ required: true, message: '请选择目标日期' }]}
+            >
+              <DatePicker />
+            </Form.Item>
+          )}
+        </Form>
+      </Modal>
     </div>
   )
-}
-
-function smallButtonStyle(background: string, color: string): React.CSSProperties {
-  return {
-    padding: '4px 10px',
-    borderRadius: 6,
-    border: '1px solid #ccc',
-    background,
-    color,
-    cursor: 'pointer',
-    fontSize: 12,
-    height: 'fit-content'
-  }
 }
