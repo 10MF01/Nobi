@@ -1,7 +1,15 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '../../../shared/ipcChannels'
-import type { PetReactionPayload } from '../../../shared/types'
+import type { PetReactionPayload, PlanInput } from '../../../shared/types'
 import { openPanelWindow } from '../windows/panelWindow'
+import {
+  listPlans,
+  createPlan,
+  updatePlan,
+  deletePlan,
+  setPlanDone
+} from '../store/repositories/planRepo'
+import { listCheckInsForDate, toggleCheckIn } from '../store/repositories/checkinRepo'
 
 export function registerIpcHandlers(petWindow: BrowserWindow): void {
   let dragOrigin: { x: number; y: number } | null = null
@@ -32,4 +40,26 @@ export function registerIpcHandlers(petWindow: BrowserWindow): void {
   ipcMain.on(IPC_CHANNELS.PANEL_TEST_REACTION, (_event, payload: PetReactionPayload) => {
     petWindow.webContents.send(IPC_CHANNELS.PET_REACTION, payload)
   })
+
+  ipcMain.handle(IPC_CHANNELS.PLANS_LIST, () => listPlans())
+
+  ipcMain.handle(IPC_CHANNELS.PLANS_CREATE, (_event, input: PlanInput) => createPlan(input))
+
+  ipcMain.handle(IPC_CHANNELS.PLANS_UPDATE, (_event, id: number, input: Partial<PlanInput>) =>
+    updatePlan(id, input)
+  )
+
+  ipcMain.handle(IPC_CHANNELS.PLANS_DELETE, (_event, id: number) => deletePlan(id))
+
+  ipcMain.handle(IPC_CHANNELS.PLANS_SET_DONE, (_event, id: number, isDone: boolean) =>
+    setPlanDone(id, isDone)
+  )
+
+  ipcMain.handle(IPC_CHANNELS.CHECKINS_LIST_FOR_DATE, (_event, date: string) =>
+    listCheckInsForDate(date)
+  )
+
+  ipcMain.handle(IPC_CHANNELS.CHECKINS_TOGGLE, (_event, planId: number, date: string) =>
+    toggleCheckIn(planId, date)
+  )
 }

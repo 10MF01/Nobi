@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { IPC_CHANNELS } from '../../shared/ipcChannels'
-import type { PetReactionPayload } from '../../shared/types'
+import type { CheckIn, PetReactionPayload, Plan, PlanInput } from '../../shared/types'
 
 // Custom APIs for renderer
 const api = {
@@ -21,6 +21,22 @@ const api = {
     open: (): void => ipcRenderer.send(IPC_CHANNELS.PANEL_OPEN),
     testReaction: (payload: PetReactionPayload): void =>
       ipcRenderer.send(IPC_CHANNELS.PANEL_TEST_REACTION, payload)
+  },
+  plans: {
+    list: (): Promise<Plan[]> => ipcRenderer.invoke(IPC_CHANNELS.PLANS_LIST),
+    create: (input: PlanInput): Promise<Plan> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PLANS_CREATE, input),
+    update: (id: number, input: Partial<PlanInput>): Promise<Plan> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PLANS_UPDATE, id, input),
+    delete: (id: number): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.PLANS_DELETE, id),
+    setDone: (id: number, isDone: boolean): Promise<Plan> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PLANS_SET_DONE, id, isDone)
+  },
+  checkIns: {
+    listForDate: (date: string): Promise<CheckIn[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHECKINS_LIST_FOR_DATE, date),
+    toggle: (planId: number, date: string): Promise<CheckIn | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHECKINS_TOGGLE, planId, date)
   }
 }
 

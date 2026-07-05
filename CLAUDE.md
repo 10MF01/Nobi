@@ -67,7 +67,7 @@ npm run build:mac           # 打包 macOS（dmg）
 - `src/main/windows/` — 窗口工厂函数（每种窗口一个文件）
 - `src/main/ipc/handlers.ts` — 所有 `ipcMain.on/handle` 的注册点
 - `src/main/tray.ts` — 系统托盘图标与右键菜单
-- `src/main/store/`（M3 起）— `better-sqlite3` 连接与 repositories，关系型查询（今日完成率、连续打卡天数）天然适合 SQL 而不是手写 JSON 过滤
+- `src/main/store/`（M3 起）— `db.ts` 是 `better-sqlite3` 单例连接（懒加载，数据库文件在 `app.getPath('userData')/nobi.db`），启动时 `CREATE TABLE IF NOT EXISTS` 建表，没有做正式迁移框架；`repositories/planRepo.ts`、`repositories/checkinRepo.ts` 封装 SQL，对外只暴露 `shared/types.ts` 里的驼峰字段类型（repo 内部负责 snake_case 列名 ↔ 驼峰字段的转换）
 - `src/main/engine/`（M4 起）— `reactionEngine.ts` 规则引擎，接口是 `ReactionEngine { react(ctx: ReactionContext): ReactionResult }`，刻意保持零 Electron 依赖、可单测、可在未来替换成调用 Claude API 的动态生成版本而不改调用方
 - `src/main/scheduler/`（M5 起）— `node-schedule` 定时任务（中午提醒/晚间提醒/日终总结）
 
@@ -79,11 +79,19 @@ npm run build:mac           # 打包 macOS（dmg）
 - 面板页面（`src/renderer/panel/App.tsx`）有 4 个测试按钮，调用 `window.api.panel.testReaction({ emotion, durationMs })`，主进程收到 `PANEL_TEST_REACTION` 后原样转发给宠物窗口 —— 这是验证每个情绪状态观感的标准方式，以后新增/调整表情也应该先在这里测试。
 - 单击宠物（非拖拽）目前会触发一个 1.2s 的 `happy` 反应（"摸它一下它会开心"），这是占位行为；M4 会用 `reactionEngine` 的真实规则替换/扩展这个反应来源。
 
+### 数据模型与计划管理（M3 起生效）
+
+- `shared/types.ts` 定义 `PlanType = 'daily' | 'weekly' | 'countdown' | 'one_off'`、`Plan`、`PlanInput`、`CheckIn`。四种类型共用一张 `plans` 表（而不是每种类型单独建表），类型特有字段（`weekdays`、`targetDate`）对不适用的类型直接置 `null`——因为四种计划共享增删改+列表渲染逻辑的部分远大于差异部分。
+- `daily`/`weekly` 计划的"今天完成了没"由 `check_ins` 表判断（`UNIQUE(plan_id, date)`，同一天重复打卡即 toggle 取消），不占用 `plans.is_done`；`countdown`/`one_off` 相反，直接用 `plans.is_done` 表示达成/完成，不走 `check_ins`。两条判断路径不要混用。
+- IPC 走 `ipcMain.handle`/`ipcRenderer.invoke`（区别于 M1/M2 的 `on`/`send`），因为增删改查都需要返回值；`window.api.plans.*` 和 `window.api.checkIns.*` 是对应的 preload 封装。
+- `src/renderer/panel/pages/PlansPage.tsx` 是当前面板的主页签（`App.tsx` 里做了一个极简的 tab 切换，"计划管理"/"测试反应"），四种类型固定分区展示，新建表单按所选类型显示星期选择器或日期选择器；编辑走的是行内编辑（点"编辑"切换该行为输入框），不是弹窗。
+- **`better-sqlite3` 是原生模块，每次单独 `npm install` 新增/更新依赖后，如果 `npm run dev` 里报 `NODE_MODULE_VERSION` 不匹配（ERR_DLOPEN_FAILED），要手动跑一次 `npx electron-builder install-app-deps` 重新为 Electron 的 Node ABI 编译，然后完全杀掉旧的 electron 进程再 `npm run dev`（单纯 HMR 不会重新加载原生模块）。** postinstall 钩子理论上会自动做这件事，但实测在同一次 `npm install <pkg>` 里未必生效，遇到该报错时优先假设是这个原因。
+
 ## 里程碑与当前进度
 
 1. ✅ **M1**（已完成）— 裸透明悬浮窗 + 托盘：可拖拽、托盘菜单、面板窗口双击可打开。已在真实 Windows 桌面上截图验证拖拽和双击开面板正常工作。
 2. ✅ **M2**（已完成）— 情绪状态机：`framer-motion` 驱动的可爱角色（`PetCharacter.tsx`），idle/happy/comfort/stern 四态，面板测试按钮手动触发，收到反应后自动播放并在 `durationMs` 后回到 idle。已逐个状态截图验证。
-3. ⏳ **M3** — 计划/打卡数据模型：`better-sqlite3` 接入，`PlansPage` 完整增删改。
+3. ✅ **M3**（已完成）— 计划/打卡数据模型：`better-sqlite3` 接入（`src/main/store/`），`PlansPage` 完整支持四种计划类型的增删改查、打卡/完成勾选、行内编辑。已在真实 Windows 桌面上创建四种类型的计划、勾选打卡/完成、编辑标题、删除，并**完全重启应用**验证数据正确持久化（sqlite 文件在 userData 目录，不是内存态）。
 4. ⏳ **M4** — 文案库 + 规则引擎接入打卡：`MessagePoolsPage` + 种子文案，真正的完成率/连续天数计算，打卡真正触发のびちゃん反应。
 5. ⏳ **M5** — 主动提醒/通知：`node-schedule` 定时任务、原生通知、设置里可调提醒时间。
 6. ⏳ **M6** — `HistoryPage`、UI 打磨、`electron-builder` 双平台打包测试。
