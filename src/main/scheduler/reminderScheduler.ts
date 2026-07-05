@@ -16,32 +16,39 @@ function cronFromTime(time: string): string {
   return `${minute} ${hour} * * *`
 }
 
+/** settings 里存的是未经校验的 JSON，时间字符串万一损坏时 scheduleJob 会返回 null——
+ * 跳过并打日志，而不是把 null 混进 jobs 数组，否则下次 reschedule 时 job.cancel() 会直接崩掉整个主进程 */
+function scheduleValidJob(time: string, task: () => void): schedule.Job | null {
+  const job = schedule.scheduleJob(cronFromTime(time), task)
+  if (!job) {
+    console.error(`[reminderScheduler] 提醒时间格式无效，已跳过这个任务: "${time}"`)
+  }
+  return job
+}
+
 /** 首次启动 + 每次面板保存提醒设置后都调用这个，先清空旧任务再按最新设置重排 */
 export function rescheduleReminders(petWindow: BrowserWindow): void {
   jobs.forEach((job) => job.cancel())
   jobs = []
 
   const settings = getReminderSettings()
+  const newJobs: (schedule.Job | null)[] = []
 
   if (settings.noonEnabled) {
-    jobs.push(
-      schedule.scheduleJob(cronFromTime(settings.noonTime), () =>
-        triggerNudgeReaction(petWindow, today())
-      )
+    newJobs.push(
+      scheduleValidJob(settings.noonTime, () => triggerNudgeReaction(petWindow, today()))
     )
   }
   if (settings.eveningEnabled) {
-    jobs.push(
-      schedule.scheduleJob(cronFromTime(settings.eveningTime), () =>
-        triggerNudgeReaction(petWindow, today())
-      )
+    newJobs.push(
+      scheduleValidJob(settings.eveningTime, () => triggerNudgeReaction(petWindow, today()))
     )
   }
   if (settings.summaryEnabled) {
-    jobs.push(
-      schedule.scheduleJob(cronFromTime(settings.summaryTime), () =>
-        triggerDailySummary(petWindow, today())
-      )
+    newJobs.push(
+      scheduleValidJob(settings.summaryTime, () => triggerDailySummary(petWindow, today()))
     )
   }
+
+  jobs = newJobs.filter((job): job is schedule.Job => job !== null)
 }

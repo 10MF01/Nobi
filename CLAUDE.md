@@ -123,6 +123,18 @@ npm run build:mac           # 打包 macOS（dmg）
 - `electron-builder.yml` 清理：删掉了 mac `extendInfo` 里的摄像头/麦克风/文稿/下载 文件夹权限描述（脚手架默认值，Nobi 完全不用这些权限，留着只会让用户看到不相关的系统权限弹窗/Info.plist 条目却不知道为什么）；删掉了 `linux`/`appImage` 整段配置和 `package.json` 里的 `build:linux` 脚本（CLAUDE.md 锁定的目标平台从始至终是 Windows + Mac，没有 Linux）；删掉了指向 `https://example.com/auto-updates` 的占位 `publish` 配置（没有自动更新后端，留着这段没意义）；`mac.category` 补成了 `public.app-category.productivity`。`package.json` 的 `description`/`author`/`homepage` 也从脚手架占位值改成了真实信息。
 - **打包验证（仅 Windows，本机是 Windows 开发环境）**：`npm run build:win` 成功产出 `dist/nobi-1.0.0-setup.exe`；额外直接跑了 `dist/win-unpacked/nobi.exe`（不是走 nsis 安装包，是解包后的产物）做冒烟测试，确认脱离 `electron-vite dev` 的开发模式后 `better-sqlite3` 原生模块、asar 打包路径解析、托盘图标、面板所有页签都正常——用的是和 dev 模式相同的 userData 目录（因为 `appId`/`productName` 没变），所以看到的是同一份数据库，不是全新空状态，这是预期行为。**Mac 打包完全没有在本机测试过**——这台是 Windows 机器，`npm run build:mac` 从 Windows 生成的 Mac 产物不可信（尤其 `better-sqlite3` 是原生模块，必须在真正的 Mac 上 `npm install` 重新编译，`npmRebuild: false` 意味着打包时不会自动重编译，必须确保打包前那台 Mac 已经装过依赖）；只对 `electron-builder.yml` 的 mac 配置做了人工审查（entitlements、`notarize: false` 符合"个人使用暂不签名公证"的既定决策），真正验证需要等到有 Mac 环境的时候。
 
+### 代码审查修复（M6 之后，全量代码检查）
+
+- 新增 `src/main/engine/dateUtils.ts`：`DATE_FORMAT`/`STREAK_LOOKBACK_DAYS`/`weekdayOfDate`/`offsetDate`/`isRecurringPlanApplicable`/`buildCheckInIndex` 这几个此前在 `reactionCoordinator.ts`、`historyService.ts`、`streakCalculator.ts` 里各自重复定义的东西，现在统一从这里 import——起因是一次全量代码审查发现"60 天回溯窗口"这个数字在三个文件里各自用不同变量名重复了一遍，日期换算函数也复制了两份，属于同一处改动忘了同步改另一处就会悄悄产生分歧的隐患。以后新增"给定日期是否到期""按日期分组打卡记录"这类逻辑，先看这个文件里有没有现成的。
+- **修复：每周计划的打卡复选框以前不看今天是星期几，任何一天都能点**——用户可以在计划没排到的日子里打卡，のびちゃん 也会给出开心反应，但 `streakCalculator` 根本不认这次打卡，完成率/连续天数完全不受影响，是个会一直存在但永远不生效的"幽灵打卡"。现在 `PlansPage.tsx` 会按 `isDueToday` 判断当天是否到期，不到期就禁用复选框并显示"今天无需打卡"标签。
+- **修复：新建/编辑每周计划时，星期几选择框以前没有必填校验**，可以留空直接提交，导致这个计划以后永远不会被认为"到期"，用户却看不出异常。现在两处表单的 `weekdays` 字段都加了 `{ required: true, type: 'array', min: 1 }` 规则。
+- **修复：`PlansPage.tsx` 的 `today` 以前用 `useMemo(() => todayStr(), [])` 只算一次**——面板窗口只是隐藏/显示、从不销毁重建（见 `panelWindow.ts`），如果跨过午夜还开着面板，打卡状态和打卡动作会一直悄悄指向昨天。现在改成 `useState` + 每分钟检查一次是否跨天，跨天了才触发一次真正的状态更新（避免每分钟都无意义重渲染）。
+- **修复：`reminderScheduler.ts` 对无效的提醒时间没有防御**——`node-schedule` 的 `scheduleJob` 遇到非法 cron 表达式会返回 `null`（已用 `node -e` 实测验证），如果 `null` 混进 `jobs` 数组，下次重新排程时对它调用 `.cancel()` 会直接抛出未捕获异常，崩掉整个主进程。现在 `scheduleValidJob` 包装了这个调用，遇到 `null` 只打日志跳过，不会污染 `jobs` 数组。
+- **修复：打卡时如果计划恰好在这之前被删除，`toggleCheckIn` 会因为外键约束抛出 SQLite 异常，面板侧没有 catch**，导致一个未处理的 promise rejection 和卡住的复选框。现在 `handleToggleCheckIn` 包了 try/catch，失败时提示"打卡失败，计划可能已被删除"并重新拉取最新状态。
+- **修复：`PLANS_SET_DONE` 的 handler 以前不看计划类型就触发庆祝反应**——`isDone` 按设计只给 countdown/one_off 用，daily/weekly 靠 check-ins 判断完成情况，现在 handler 里加了类型判断，只有 countdown/one_off 变成已完成才会触发 `triggerGoalDoneReaction`。
+- 顺手修正了 `reactionCoordinator.ts` 里一句误导性注释（之前写"daily_summaries 供 M6 HistoryPage 使用"，但 `historyService.ts` 明确不读这张表，两处注释自相矛盾）。
+- **暂不修复**：`isRecurringPlanApplicable`/`hasApplicablePlans` 仍然不看 `plan.createdAt`，删除/编辑计划仍会让 `HistoryPage` 和打卡反应的历史数据"重新计算"（比如删掉一个真实完成过 70% 的计划后，那些天会显示成"当天没有安排"而不是真实的历史完成率）——这是上面"历史记录"小节已经记录过的已知简化，改动会同时牵涉 `streakCalculator.ts` 和需要重新验证 M4/M5 的打卡反应逻辑，属于需要用户明确拍板再动的深层改动，这次代码审查只记录、不擅自修复。
+
 ### 面板 UI 组件库约定（Ant Design，M3 后接入）
 
 - `src/renderer/panel/App.tsx` 顶层包一层 `ConfigProvider`，`theme.token` 里定义了品牌主题色：`colorPrimary: '#3f9b54'`（森绿，呼应のびちゃん本身的配色，不是 Ant Design 默认的靛蓝），以及 `colorBgLayout`/`colorBorder`/`fontFamily`（CJK 字体栈 `PingFang SC`/`Microsoft YaHei UI` 优先）。以后调整面板整体配色，改这里的 token 就行，不用满页面找内联样式。同时传了 `locale={zhCN}`（`antd/locale/zh_CN`），保证 `DatePicker`/`Popconfirm` 等内置文案是中文。

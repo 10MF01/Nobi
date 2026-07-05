@@ -1,4 +1,5 @@
 import type { Plan } from '../../../shared/types'
+import { STREAK_LOOKBACK_DAYS, isRecurringPlanApplicable } from './dateUtils'
 
 export interface DailyStats {
   completionRate: number
@@ -7,13 +8,6 @@ export interface DailyStats {
 
 /** 达到这个完成率才算"这一天成功"，同时也是 streak 计数的门槛 */
 const STREAK_SUCCESS_THRESHOLD = 0.8
-const STREAK_LOOKBACK_DAYS = 60
-
-function isApplicable(plan: Plan, weekday: number): boolean {
-  if (plan.type === 'daily') return true
-  if (plan.type === 'weekly') return plan.weekdays?.includes(weekday) ?? false
-  return false
-}
 
 /**
  * 纯函数：给定当前 daily/weekly 计划集合 + 任意日期的打卡查询回调，
@@ -31,7 +25,7 @@ export function computeDailyStats(
   const recurringPlans = plans.filter((p) => p.type === 'daily' || p.type === 'weekly')
 
   function rateForDate(d: string): number | null {
-    const applicable = recurringPlans.filter((p) => isApplicable(p, weekdayOfDate(d)))
+    const applicable = recurringPlans.filter((p) => isRecurringPlanApplicable(p, weekdayOfDate(d)))
     if (applicable.length === 0) return null
     const checked = checkedPlanIdsOnDate(d)
     const done = applicable.filter((p) => checked.has(p.id)).length

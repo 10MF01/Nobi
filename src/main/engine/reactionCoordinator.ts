@@ -1,4 +1,3 @@
-import dayjs from 'dayjs'
 import { Notification } from 'electron'
 import type { BrowserWindow } from 'electron'
 import icon from '../../../resources/icon.png?asset'
@@ -10,20 +9,17 @@ import { listActiveMessages, markMessageUsed } from '../store/repositories/messa
 import { upsertDailySummary } from '../store/repositories/dailySummaryRepo'
 import { computeDailyStats, type DailyStats } from './streakCalculator'
 import { reactionEngine, pickMessageForCategory } from './reactionEngine'
+import {
+  STREAK_LOOKBACK_DAYS,
+  weekdayOfDate,
+  offsetDate,
+  isRecurringPlanApplicable,
+  buildCheckInIndex
+} from './dateUtils'
 
-const DATE_FORMAT = 'YYYY-MM-DD'
-const LOOKBACK_DAYS = 60
 const REACTION_DURATION_MS = 4500
 const NUDGE_DURATION_MS = 6000
 const LOW_RATE_THRESHOLD = 0.4
-
-function weekdayOfDate(date: string): number {
-  return dayjs(date).day()
-}
-
-function offsetDate(date: string, dayOffset: number): string {
-  return dayjs(date).add(dayOffset, 'day').format(DATE_FORMAT)
-}
 
 function sendReaction(petWindow: BrowserWindow, result: ReactionResult): void {
   if (result.message) {
@@ -45,14 +41,8 @@ function sendNotification(title: string, body: string): void {
 /** 打卡/日终总结共用的完成率+连续天数计算，避免重复拼装 checkin 数据 */
 function buildTodayContext(date: string): { ctx: ReactionContext; todayStats: DailyStats } {
   const plans = listPlans()
-  const checkIns = listCheckInsInRange(offsetDate(date, -LOOKBACK_DAYS), date)
-
-  const checkInsByDate = new Map<string, Set<number>>()
-  for (const c of checkIns) {
-    if (!checkInsByDate.has(c.date)) checkInsByDate.set(c.date, new Set())
-    checkInsByDate.get(c.date)!.add(c.planId)
-  }
-  const checkedPlanIdsOnDate = (d: string): Set<number> => checkInsByDate.get(d) ?? new Set()
+  const checkIns = listCheckInsInRange(offsetDate(date, -STREAK_LOOKBACK_DAYS), date)
+  const checkedPlanIdsOnDate = buildCheckInIndex(checkIns)
 
   const todayStats = computeDailyStats(plans, date, checkedPlanIdsOnDate, weekdayOfDate, offsetDate)
   const yesterdayStats = computeDailyStats(
@@ -98,11 +88,8 @@ export function triggerGoalDoneReaction(petWindow: BrowserWindow): void {
 export function triggerNudgeReaction(petWindow: BrowserWindow, date: string): void {
   const plans = listPlans()
   const checkedIds = new Set(listCheckInsForDate(date).map((c) => c.planId))
-  const applicablePlans = plans.filter(
-    (p) =>
-      p.type === 'daily' ||
-      (p.type === 'weekly' && (p.weekdays?.includes(weekdayOfDate(date)) ?? false))
-  )
+  const todayWeekday = weekdayOfDate(date)
+  const applicablePlans = plans.filter((p) => isRecurringPlanApplicable(p, todayWeekday))
   const allDone = applicablePlans.every((p) => checkedIds.has(p.id))
   if (applicablePlans.length === 0 || allDone) return
 
@@ -119,7 +106,8 @@ export function triggerNudgeReaction(petWindow: BrowserWindow, date: string): vo
   sendNotification('のびちゃん', message.text)
 }
 
-/** 日终总结：写入 daily_summaries 快照（供 M6 HistoryPage 使用），并给一次真实反应 + 通知总结文案 */
+/** 日终总结：给一次真实反应 + 通知总结文案，并写入 daily_summaries 作为日志快照——
+ * 这张表只是留痕，HistoryPage 不读它（现算，见 historyService.ts），别指望靠它补历史数据 */
 export function triggerDailySummary(petWindow: BrowserWindow, date: string): void {
   const { ctx, todayStats } = buildTodayContext(date)
   upsertDailySummary(date, todayStats.completionRate, todayStats.currentStreak)

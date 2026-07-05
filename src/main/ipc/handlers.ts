@@ -75,7 +75,9 @@ export function registerIpcHandlers(petWindow: BrowserWindow): void {
 
   ipcMain.handle(IPC_CHANNELS.PLANS_SET_DONE, (_event, id: number, isDone: boolean) => {
     const plan = setPlanDone(id, isDone)
-    if (isDone) {
+    // isDone 只对 countdown/one_off 有意义（daily/weekly 靠 check-ins），
+    // 类型判断放在这里而不是仅靠调用方守规矩，避免任何未来调用路径误触发庆祝反应
+    if (isDone && (plan.type === 'countdown' || plan.type === 'one_off')) {
       triggerGoalDoneReaction(petWindow)
     }
     return plan

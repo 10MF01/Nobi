@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Button,
   Card,
@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   List,
+  message,
   Modal,
   Popconfirm,
   Select,
@@ -58,6 +59,13 @@ function isCheckInType(type: PlanType): boolean {
   return type === 'daily' || type === 'weekly'
 }
 
+/** 每周任务只在勾选的星期几到期，daily 每天都到期；countdown/one_off 不走这条打卡路径 */
+function isDueToday(plan: Plan, todayWeekday: number): boolean {
+  if (plan.type === 'daily') return true
+  if (plan.type === 'weekly') return plan.weekdays?.includes(todayWeekday) ?? false
+  return true
+}
+
 export function PlansPage(): React.JSX.Element {
   const [plans, setPlans] = useState<Plan[]>([])
   const [checkedInIds, setCheckedInIds] = useState<Set<number>>(new Set())
@@ -68,7 +76,17 @@ export function PlansPage(): React.JSX.Element {
   const [editForm] = Form.useForm<EditFormValues>()
   const addType = Form.useWatch('type', addForm)
 
-  const today = useMemo(() => todayStr(), [])
+  // 面板窗口只是隐藏/显示、从不销毁重建，state 必须自己在跨天时刷新，不能只算一次
+  const [today, setToday] = useState(todayStr())
+  const todayWeekday = dayjs(today).day()
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const current = todayStr()
+      setToday((prev) => (prev === current ? prev : current))
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     let ignore = false
@@ -111,7 +129,11 @@ export function PlansPage(): React.JSX.Element {
   }
 
   async function handleToggleCheckIn(planId: number): Promise<void> {
-    await window.api.checkIns.toggle(planId, today)
+    try {
+      await window.api.checkIns.toggle(planId, today)
+    } catch {
+      message.error('打卡失败，计划可能已被删除')
+    }
     await reload()
   }
 
@@ -177,7 +199,11 @@ export function PlansPage(): React.JSX.Element {
           </Space>
 
           {addType === 'weekly' && (
-            <Form.Item name="weekdays" label="每周星期">
+            <Form.Item
+              name="weekdays"
+              label="每周星期"
+              rules={[{ required: true, type: 'array', min: 1, message: '请至少选择一天' }]}
+            >
               <Checkbox.Group>
                 <Space wrap>
                   {WEEKDAY_LABELS.map((label, day) => (
@@ -223,6 +249,7 @@ export function PlansPage(): React.JSX.Element {
                 dataSource={group}
                 renderItem={(plan) => {
                   const checked = isCheckInType(type) ? checkedInIds.has(plan.id) : plan.isDone
+                  const dueToday = isDueToday(plan, todayWeekday)
                   return (
                     <List.Item
                       actions={[
@@ -246,6 +273,7 @@ export function PlansPage(): React.JSX.Element {
                       <Space align="start">
                         <Checkbox
                           checked={checked}
+                          disabled={isCheckInType(type) && !dueToday}
                           onChange={() =>
                             isCheckInType(type)
                               ? handleToggleCheckIn(plan.id)
@@ -255,6 +283,7 @@ export function PlansPage(): React.JSX.Element {
                         <div>
                           <Text delete={plan.isDone}>{plan.title}</Text>
                           <div style={{ marginTop: 4 }}>
+                            {isCheckInType(type) && !dueToday && <Tag>今天无需打卡</Tag>}
                             {plan.note && (
                               <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
                                 {plan.note}
@@ -304,7 +333,11 @@ export function PlansPage(): React.JSX.Element {
             <Input />
           </Form.Item>
           {editingPlan?.type === 'weekly' && (
-            <Form.Item name="weekdays" label="每周星期">
+            <Form.Item
+              name="weekdays"
+              label="每周星期"
+              rules={[{ required: true, type: 'array', min: 1, message: '请至少选择一天' }]}
+            >
               <Checkbox.Group>
                 <Space wrap>
                   {WEEKDAY_LABELS.map((label, day) => (

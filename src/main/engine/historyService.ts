@@ -3,24 +3,18 @@ import type { HistoryOverview, Plan } from '../../../shared/types'
 import { listPlans } from '../store/repositories/planRepo'
 import { listCheckInsInRange } from '../store/repositories/checkinRepo'
 import { computeDailyStats } from './streakCalculator'
-
-const DATE_FORMAT = 'YYYY-MM-DD'
-/** streak 计算本身要往回看的天数，给最早展示的那天留够缓冲 */
-const STREAK_LOOKBACK_BUFFER_DAYS = 60
-
-function weekdayOfDate(date: string): number {
-  return dayjs(date).day()
-}
-
-function offsetDate(date: string, dayOffset: number): string {
-  return dayjs(date).add(dayOffset, 'day').format(DATE_FORMAT)
-}
+import {
+  DATE_FORMAT,
+  STREAK_LOOKBACK_DAYS,
+  weekdayOfDate,
+  offsetDate,
+  isRecurringPlanApplicable,
+  buildCheckInIndex
+} from './dateUtils'
 
 function hasApplicablePlans(plans: Plan[], date: string): boolean {
   const weekday = weekdayOfDate(date)
-  return plans.some(
-    (p) => p.type === 'daily' || (p.type === 'weekly' && (p.weekdays?.includes(weekday) ?? false))
-  )
+  return plans.some((p) => isRecurringPlanApplicable(p, weekday))
 }
 
 /**
@@ -30,17 +24,8 @@ function hasApplicablePlans(plans: Plan[], date: string): boolean {
 export function getHistoryOverview(days: number): HistoryOverview {
   const today = dayjs().format(DATE_FORMAT)
   const plans = listPlans()
-  const checkIns = listCheckInsInRange(
-    offsetDate(today, -(days + STREAK_LOOKBACK_BUFFER_DAYS)),
-    today
-  )
-
-  const checkInsByDate = new Map<string, Set<number>>()
-  for (const c of checkIns) {
-    if (!checkInsByDate.has(c.date)) checkInsByDate.set(c.date, new Set())
-    checkInsByDate.get(c.date)!.add(c.planId)
-  }
-  const checkedPlanIdsOnDate = (d: string): Set<number> => checkInsByDate.get(d) ?? new Set()
+  const checkIns = listCheckInsInRange(offsetDate(today, -(days + STREAK_LOOKBACK_DAYS)), today)
+  const checkedPlanIdsOnDate = buildCheckInIndex(checkIns)
 
   const points: HistoryOverview['points'] = []
   let currentStreak = 0
